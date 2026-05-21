@@ -65,7 +65,7 @@ export default function TaskDetail() {
             <Button pattern="success" onClick={handleRunNow} icon={
               <PlayIcon />
             }>Run Now</Button>
-            <Button pattern="secondary" onClick={() => navigate(`/tasks/${id()}/edit`)} icon={
+            <Button pattern="secondary" onClick={() => navigate(`/tasks/create?id=${id()}`)} icon={
               <EditIcon />
             }>Edit</Button>
             <Button pattern="danger" onClick={handleDelete} icon={
