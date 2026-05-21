@@ -6,6 +6,7 @@ server/data/
 dist/
 web/.output/
 web/dist/
+web/.vinxi/
 
 # Environment
 .env

@@ -1,6 +1,8 @@
 import { createResource, createSignal, onCleanup } from "solid-js";
-import { useNavigate, A } from "@solidjs/router";
+import { useNavigate } from "@solidjs/router";
 import { api } from "~/lib/api";
+import { Button, Toggle } from "~/components";
+import { PlusIcon, RefreshIcon, TaskIcon } from "~/components/icons";
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -32,8 +34,7 @@ export default function Dashboard() {
     }
   };
 
-  const handleToggleEnabled = async (id: string, current: boolean, e: Event) => {
-    e.stopPropagation();
+  const handleToggleEnabled = async (id: string, current: boolean) => {
     try {
       const task = await api.getTask(id);
       await api.updateTask(id, { ...task, enabled: !current });
@@ -62,15 +63,9 @@ export default function Dashboard() {
             </div>
             <h1 class="text-xl font-semibold text-white">AgentLoop</h1>
           </div>
-          <button
-            onClick={() => navigate("/tasks/create")}
-            class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-colors"
-          >
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-            </svg>
-            New Task
-          </button>
+          <Button pattern="primary" onClick={() => navigate("/tasks/create")} icon={
+            <PlusIcon />
+          }>New Task</Button>
         </div>
       </header>
 
@@ -83,15 +78,9 @@ export default function Dashboard() {
           </div>
           <div class="flex items-center gap-2 text-sm text-gray-400">
             <span>Auto-refreshing every 10s</span>
-            <button
-              onClick={() => refetch()}
-              class="p-1.5 rounded-lg hover:bg-gray-800 transition-colors"
-              title="Refresh now"
-            >
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-            </button>
+            <Button pattern="ghost" onClick={() => refetch()} title="Refresh now" icon={
+              <RefreshIcon />
+            } />
           </div>
         </div>
 
@@ -110,12 +99,7 @@ export default function Dashboard() {
           <div class="bg-red-900/20 border border-red-800 rounded-xl p-6 text-center">
             <p class="text-red-400 font-medium">Failed to load tasks</p>
             <p class="text-red-300/70 text-sm mt-1">{(tasks.error as any)?.message || "Unknown error"}</p>
-            <button
-              onClick={() => refetch()}
-              class="mt-3 px-4 py-2 rounded-lg bg-red-800 hover:bg-red-700 text-white text-sm transition-colors"
-            >
-              Retry
-            </button>
+            <Button pattern="secondary" onClick={() => refetch()}>Retry</Button>
           </div>
         )}
 
@@ -123,21 +107,13 @@ export default function Dashboard() {
         {tasks() && tasks()!.length === 0 && (
           <div class="border border-dashed border-gray-700 rounded-xl p-16 text-center">
             <div class="w-16 h-16 mx-auto rounded-full bg-gray-800 flex items-center justify-center mb-4">
-              <svg class="w-8 h-8 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-              </svg>
+              <TaskIcon class="text-gray-500" />
             </div>
             <h3 class="text-lg font-medium text-gray-300">No tasks yet</h3>
             <p class="text-gray-500 text-sm mt-1">Create your first agent loop task to get started.</p>
-            <button
-              onClick={() => navigate("/tasks/create")}
-              class="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-colors"
-            >
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-              </svg>
-              Create Task
-            </button>
+            <Button pattern="primary" onClick={() => navigate("/tasks/create")} icon={
+              <PlusIcon />
+            }>Create Task</Button>
           </div>
         )}
 
@@ -175,18 +151,12 @@ export default function Dashboard() {
                       <span class="text-sm text-gray-400">{task.intervalSeconds ?? "—"}s</span>
                     </td>
                     <td class="px-4 py-3.5">
-                      <button
-                        onClick={(e) => handleToggleEnabled(task.id, task.enabled ?? false, e)}
-                        class={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                          task.enabled ? "bg-indigo-600" : "bg-gray-700"
-                        }`}
-                      >
-                        <span
-                          class={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                            task.enabled ? "translate-x-[18px]" : "translate-x-[3px]"
-                          }`}
+                      <span onClick={(e) => e.stopPropagation()}>
+                        <Toggle
+                          checked={task.enabled ?? false}
+                          onChange={() => handleToggleEnabled(task.id, task.enabled ?? false)}
                         />
-                      </button>
+                      </span>
                     </td>
                     <td class="px-4 py-3.5">
                       <div class="flex items-center gap-2">
@@ -197,18 +167,8 @@ export default function Dashboard() {
                     </td>
                     <td class="px-4 py-3.5 text-right">
                       <div class="flex items-center justify-end gap-1.5">
-                        <button
-                          onClick={(e) => handleRunNow(task.id, e)}
-                          class="px-3 py-1.5 rounded-md bg-emerald-700 hover:bg-emerald-600 text-emerald-100 text-xs font-medium transition-colors"
-                        >
-                          Run
-                        </button>
-                        <button
-                          onClick={(e) => handleDelete(task.id, e)}
-                          class="px-3 py-1.5 rounded-md bg-red-900/50 hover:bg-red-800 text-red-300 text-xs font-medium transition-colors"
-                        >
-                          Delete
-                        </button>
+                        <Button pattern="success" size="sm" onClick={(e) => handleRunNow(task.id, e)}>Run</Button>
+                        <Button pattern="danger" size="sm" onClick={(e) => handleDelete(task.id, e)}>Delete</Button>
                       </div>
                     </td>
                   </tr>

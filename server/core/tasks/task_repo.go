@@ -136,8 +136,13 @@ func (r *TaskRepository) Update(task *Task) error {
 	return nil
 }
 
-// Delete removes a task by its ID.
+// Delete removes a task by its ID and all associated runs.
 func (r *TaskRepository) Delete(id string) error {
+	// Delete associated runs first (belt and suspenders with ON DELETE CASCADE)
+	if _, err := r.db.Exec(`DELETE FROM runs WHERE task_id = ?`, id); err != nil {
+		return fmt.Errorf("delete runs for task: %w", err)
+	}
+
 	query := `DELETE FROM tasks WHERE id = ?`
 	result, err := r.db.Exec(query, id)
 	if err != nil {

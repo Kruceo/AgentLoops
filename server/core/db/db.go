@@ -54,7 +54,7 @@ func Migrate(db *sql.DB) error {
 			has_error INTEGER NOT NULL DEFAULT 0,
 			started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			finished_at DATETIME,
-			FOREIGN KEY (task_id) REFERENCES tasks(id)
+			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 		);`,
 	}
 

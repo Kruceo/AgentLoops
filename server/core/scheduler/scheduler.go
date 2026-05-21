@@ -21,18 +21,20 @@ type Scheduler struct {
 	running        bool
 	mu             sync.Mutex
 	lastRun        map[string]time.Time
+	taskRunning    map[string]bool // tracks currently executing task IDs
 	cleanupCounter int
 }
 
 // New creates a new Scheduler.
 func New(taskRepo *tasks.TaskRepository, runRepo *tasks.RunRepository, agentMgr agents.AgentManager, workDir string) *Scheduler {
 	return &Scheduler{
-		taskRepo: taskRepo,
-		runRepo:  runRepo,
-		agentMgr: agentMgr,
-		workDir:  workDir,
-		stopCh:   make(chan struct{}),
-		lastRun:  make(map[string]time.Time),
+		taskRepo:    taskRepo,
+		runRepo:     runRepo,
+		agentMgr:    agentMgr,
+		workDir:     workDir,
+		stopCh:      make(chan struct{}),
+		lastRun:     make(map[string]time.Time),
+		taskRunning: make(map[string]bool),
 	}
 }
 
@@ -76,7 +78,13 @@ func (s *Scheduler) Stop() {
 }
 
 // RunTaskNow runs a specific task immediately and returns the Run record.
+// Returns an error if the task is already running.
 func (s *Scheduler) RunTaskNow(ctx context.Context, task *tasks.Task) (*tasks.Run, error) {
+	if !s.tryAcquireTask(task.ID) {
+		return nil, fmt.Errorf("task %q is already running", task.TaskName)
+	}
+	defer s.releaseTask(task.ID)
+
 	agent, err := s.agentMgr.Get(task.AgentRunner)
 	if err != nil {
 		return nil, fmt.Errorf("get agent %s: %w", task.AgentRunner, err)
@@ -119,6 +127,32 @@ func (s *Scheduler) RunTaskNow(ctx context.Context, task *tasks.Task) (*tasks.Ru
 	return run, nil
 }
 
+// tryAcquireTask atomically checks and sets the running flag for a task.
+// Returns true if the task was NOT running and has been acquired.
+func (s *Scheduler) tryAcquireTask(taskID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.taskRunning[taskID] {
+		return false
+	}
+	s.taskRunning[taskID] = true
+	return true
+}
+
+// releaseTask clears the running flag for a task.
+func (s *Scheduler) releaseTask(taskID string) {
+	s.mu.Lock()
+	delete(s.taskRunning, taskID)
+	s.mu.Unlock()
+}
+
+// isTaskRunning checks whether a task is currently executing (lock-free read under mutex).
+func (s *Scheduler) isTaskRunning(taskID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.taskRunning[taskID]
+}
+
 // executeDueTasks checks all enabled tasks and runs any that are due.
 func (s *Scheduler) executeDueTasks() {
 	taskList, err := s.taskRepo.List(true) // enabled only
@@ -147,10 +181,15 @@ func (s *Scheduler) executeDueTasks() {
 
 		interval := time.Duration(t.IntervalSeconds) * time.Second
 		if now.Sub(lastTime) >= interval {
+			// Skip if already running (RunTaskNow will also guard at acquire level)
+			if s.isTaskRunning(t.ID) {
+				log.Printf("scheduler: task %q is still running, skipping this tick", t.TaskName)
+				continue
+			}
 			// Run in background
 			go func(task tasks.Task) {
 				// Create a context with timeout (5 minutes max per run)
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+				ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 				defer cancel()
 
 				if _, err := s.RunTaskNow(ctx, &task); err != nil {

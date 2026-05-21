@@ -1,4 +1,8 @@
-const BASE_URL = ""; // proxy handles /api routes
+// SSR runs on Node where there's no Vite proxy — need absolute URL.
+// Client runs in browser where Vite proxy handles /api → :8080.
+const BASE_URL = import.meta.env.SSR
+  ? "http://localhost:8080"
+  : "";
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {

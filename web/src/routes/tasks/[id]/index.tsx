@@ -1,6 +1,8 @@
 import { createResource } from "solid-js";
 import { useParams, useNavigate, A } from "@solidjs/router";
 import { api } from "~/lib/api";
+import { Button } from "~/components";
+import { BackArrowIcon, PlayIcon, EditIcon, TrashIcon } from "~/components/icons";
 
 export default function TaskDetail() {
   const params = useParams();
@@ -50,9 +52,7 @@ export default function TaskDetail() {
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div class="flex items-center gap-4">
             <A href="/" class="text-gray-400 hover:text-white transition-colors">
-              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
-              </svg>
+              <BackArrowIcon />
             </A>
             <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-sm">
               AL
@@ -62,34 +62,15 @@ export default function TaskDetail() {
             </h1>
           </div>
           <div class="flex items-center gap-2">
-            <button
-              onClick={handleRunNow}
-              class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-emerald-100 text-sm font-medium transition-colors"
-            >
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              Run Now
-            </button>
-            <button
-              onClick={() => navigate(`/tasks/${id()}/edit`)}
-              class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-200 text-sm font-medium transition-colors"
-            >
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-              </svg>
-              Edit
-            </button>
-            <button
-              onClick={handleDelete}
-              class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-red-900/50 hover:bg-red-800 text-red-300 text-sm font-medium transition-colors"
-            >
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-              </svg>
-              Delete
-            </button>
+            <Button pattern="success" onClick={handleRunNow} icon={
+              <PlayIcon />
+            }>Run Now</Button>
+            <Button pattern="secondary" onClick={() => navigate(`/tasks/${id()}/edit`)} icon={
+              <EditIcon />
+            }>Edit</Button>
+            <Button pattern="danger" onClick={handleDelete} icon={
+              <TrashIcon />
+            }>Delete</Button>
           </div>
         </div>
       </header>
@@ -110,9 +91,7 @@ export default function TaskDetail() {
           <div class="bg-red-900/20 border border-red-800 rounded-xl p-6 text-center">
             <p class="text-red-400 font-medium">Failed to load task</p>
             <p class="text-red-300/70 text-sm mt-1">{(task.error as any)?.message || "Unknown error"}</p>
-            <A href="/" class="mt-3 inline-block px-4 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-white text-sm transition-colors">
-              Back to Dashboard
-            </A>
+            <Button pattern="only-border" href="/">Back to Dashboard</Button>
           </div>
         )}
 
@@ -177,12 +156,7 @@ export default function TaskDetail() {
             <div>
               <div class="flex items-center justify-between mb-4">
                 <h3 class="text-lg font-semibold text-white">Runs</h3>
-                <button
-                  onClick={() => refetchRuns()}
-                  class="text-sm text-gray-400 hover:text-white transition-colors"
-                >
-                  Refresh
-                </button>
+                <Button pattern="ghost" onClick={() => refetchRuns()}>Refresh</Button>
               </div>
 
               {runs.loading && (
