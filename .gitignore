@@ -1,0 +1,33 @@
+# Dependencies
+server/tmp/
+server/data/
+
+# Build output
+dist/
+web/.output/
+web/dist/
+
+# Environment
+.env
+.env.*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test scripts & plans
+test*.sh
+scripts/
+plan.md
+
+# Node
+web/node_modules/
+
+# Backups
+*.bak
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
