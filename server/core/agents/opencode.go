@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -33,14 +35,14 @@ func (a *OpencodeAgent) Run(ctx context.Context, workDir string, initMessage str
 		args = append(args, "--model", model)
 	}
 
-	args = append(args, "--", initMessage)
+	args = append(args, initMessage)
 
 	cmd := exec.CommandContext(ctx, "opencode", args...)
 	cmd.Dir = workDir
 
 	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	cmd.Stdout = io.MultiWriter(&stdout, os.Stdout)
+	cmd.Stderr = io.MultiWriter(&stderr, os.Stdout)
 
 	err := cmd.Run()
 	if err != nil {
@@ -76,16 +78,41 @@ func (a *OpencodeAgent) GetModels() ([]string, error) {
 
 // GetModes returns the list of available agents/modes from the opencode CLI.
 func (a *OpencodeAgent) GetModes() ([]string, error) {
-	cmd := exec.Command("opencode", "agents")
+	cmd := exec.Command("opencode", "agent", "list")
 	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	cmd.Stdout = io.MultiWriter(&stdout, os.Stdout)
+	cmd.Stderr = io.MultiWriter(&stderr, os.Stdout)
 
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("opencode agents failed: %w\nstderr: %s", err, stderr.String())
+		return nil, fmt.Errorf("opencode agent list failed: %w\nstderr: %s", err, stderr.String())
 	}
 
-	return parseLines(stdout.String()), nil
+	return parseModes(stdout.String()), nil
+}
+
+// parseModes extracts agent mode names from the opencode agent list output.
+// The output format has mode names as the first word on non-indented lines,
+// e.g. "build (primary)", "chat (primary)", "code-reviewer (subagent)".
+func parseModes(output string) []string {
+	lines := strings.Split(output, "\n")
+	var result []string
+	seen := map[string]bool{}
+	for _, line := range lines {
+		// Only consider non-indented lines (mode headers)
+		if len(line) == 0 || line[0] == ' ' || line[0] == '\t' {
+			continue
+		}
+		// Extract first word before space or parenthesis
+		fields := strings.Fields(line)
+		if len(fields) > 0 {
+			name := fields[0]
+			if !seen[name] {
+				seen[name] = true
+				result = append(result, name)
+			}
+		}
+	}
+	return result
 }
 
 // IsInstalled checks if the opencode binary is available on the system PATH.

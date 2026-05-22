@@ -33,4 +33,6 @@ export const api = {
   getRuns: () => request<any[]>("/api/runs"),
   getRun: (id: string) => request<any>(`/api/runs/${id}`),
   getAgents: () => request<any[]>("/api/agents"),
+  getAgentModels: (id: string) => request<string[]>(`/api/agents/${id}/models`),
+  getAgentModes: (id: string) => request<string[]>(`/api/agents/${id}/modes`),
 };

@@ -16,6 +16,7 @@ type Task struct {
 	IntervalSeconds int       `json:"intervalSeconds"`
 	CreatedAt       time.Time `json:"createdAt"`
 	UpdatedAt       time.Time `json:"updatedAt"`
+	LastRunStatus   *string   `json:"lastRunStatus,omitempty"` // computed from latest run
 }
 
 // Run represents a single execution of a task.
@@ -26,4 +27,5 @@ type Run struct {
 	HasError   bool       `json:"hasError"`
 	StartedAt  time.Time  `json:"startedAt"`
 	FinishedAt *time.Time `json:"finishedAt"`
+	Status     string     `json:"status,omitempty"` // computed: "running" | "success" | "error"
 }

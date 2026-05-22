@@ -102,6 +102,28 @@ func (r *RunRepository) ListAll(limit int) ([]Run, error) {
 	return scanRuns(rows)
 }
 
+// GetLatestRunStatus returns the status of the latest run for a task.
+// Returns "" if no runs exist, "running" if unfinished, "success" or "error".
+func (r *RunRepository) GetLatestRunStatus(taskID string) (string, error) {
+	query := `SELECT has_error, finished_at FROM runs WHERE task_id = ? ORDER BY started_at DESC LIMIT 1`
+	var hasError int
+	var finishedAt sql.NullString
+	err := r.db.QueryRow(query, taskID).Scan(&hasError, &finishedAt)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("get latest run status: %w", err)
+	}
+	if !finishedAt.Valid {
+		return "running", nil
+	}
+	if hasError == 1 {
+		return "error", nil
+	}
+	return "success", nil
+}
+
 func scanRun(s scanner) (*Run, error) {
 	var run Run
 	if err := scanRunRow(s, &run); err != nil {
@@ -153,6 +175,15 @@ func scanRunRow(s scanner, run *Run) error {
 		if err == nil {
 			run.FinishedAt = &t
 		}
+	}
+
+	// Compute status from has_error and finished_at
+	if run.FinishedAt == nil {
+		run.Status = "running"
+	} else if run.HasError {
+		run.Status = "error"
+	} else {
+		run.Status = "success"
 	}
 
 	return nil

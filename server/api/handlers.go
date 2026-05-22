@@ -32,6 +32,8 @@ func (h *Handler) RegisterRoutes(router *Router) {
 	// Agents
 	router.GET("/api/agents", h.ListAgents)
 	router.GET("/api/agents/:id", h.GetAgent)
+	router.GET("/api/agents/:id/models", h.GetAgentModels)
+	router.GET("/api/agents/:id/modes", h.GetAgentModes)
 
 	// Tasks
 	router.GET("/api/tasks", h.ListTasks)
@@ -79,6 +81,48 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 	writeError(w, http.StatusNotFound, "agent not found")
 }
 
+// GetAgentModels returns available models for a specific agent.
+func (h *Handler) GetAgentModels(w http.ResponseWriter, r *http.Request) {
+	id := GetParam(r, "id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "missing agent id")
+		return
+	}
+
+	agent, err := h.Agents.Get(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "agent not found: "+id)
+		return
+	}
+	models, err := agent.GetModels()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get models: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, models)
+}
+
+// GetAgentModes returns available modes for a specific agent.
+func (h *Handler) GetAgentModes(w http.ResponseWriter, r *http.Request) {
+	id := GetParam(r, "id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "missing agent id")
+		return
+	}
+
+	agent, err := h.Agents.Get(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "agent not found: "+id)
+		return
+	}
+	modes, err := agent.GetModes()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get modes: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, modes)
+}
+
 // --- Task Handlers ---
 
 // ListTasks returns all tasks, optionally filtered by enabled status.
@@ -93,6 +137,13 @@ func (h *Handler) ListTasks(w http.ResponseWriter, r *http.Request) {
 		log.Printf("error listing tasks: %v", err)
 		writeError(w, http.StatusInternalServerError, "failed to list tasks")
 		return
+	}
+
+	// Populate last run status for each task
+	for i := range taskList {
+		if status, err := h.Runs.GetLatestRunStatus(taskList[i].ID); err == nil && status != "" {
+			taskList[i].LastRunStatus = &status
+		}
 	}
 
 	writeJSON(w, http.StatusOK, taskList)
@@ -188,6 +239,11 @@ func (h *Handler) GetTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Populate last run status
+	if status, err := h.Runs.GetLatestRunStatus(task.ID); err == nil && status != "" {
+		task.LastRunStatus = &status
+	}
+
 	writeJSON(w, http.StatusOK, task)
 }
 
@@ -237,6 +293,10 @@ func (h *Handler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 		task.InitMessage = *req.InitMessage
 	}
 	if req.AgentRunner != nil {
+		if _, err := h.Agents.Get(*req.AgentRunner); err != nil {
+			writeError(w, http.StatusBadRequest, "unknown agent runner: "+*req.AgentRunner)
+			return
+		}
 		task.AgentRunner = *req.AgentRunner
 	}
 	if req.AgentModel != nil {
