@@ -28,18 +28,21 @@ export default function CreateTask() {
     enabled: true,
   });
 
+  // Dedicated signal to trigger models/modes resource fetches reliably
+  const [runnerId, setRunnerId] = createSignal("");
+
   // Agent runner list (always loaded, used in both modes)
   const [agents] = createResource(() => true, api.getAgents);
 
-  // Agent models — depends on the selected runner in the form
+  // Agent models — depends on the selected runner
   const [models] = createResource(
-    () => form().agentRunner || false,
+    () => runnerId() || false,
     api.getAgentModels
   );
 
-  // Agent modes — depends on the selected runner in the form
+  // Agent modes — depends on the selected runner
   const [modes] = createResource(
-    () => form().agentRunner || false,
+    () => runnerId() || false,
     api.getAgentModes
   );
 
@@ -57,6 +60,7 @@ export default function CreateTask() {
         intervalSeconds: t.intervalSeconds ?? 60,
         enabled: t.enabled ?? true,
       });
+      if (t.agentRunner) setRunnerId(t.agentRunner);
     }
   });
 
@@ -105,6 +109,7 @@ export default function CreateTask() {
       if (field === "agentRunner" && value !== prev.agentRunner) {
         next.agentModel = "";
         next.agentMode = "";
+        setRunnerId(value);
       }
       return next;
     });

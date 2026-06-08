@@ -1,7 +1,7 @@
 import { createResource, createSignal, onCleanup } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { api } from "~/lib/api";
-import { Button, Toggle } from "~/components";
+import { Button, PageHeader, Toggle } from "~/components";
 import { PlusIcon, RefreshIcon, TaskIcon } from "~/components/icons";
 
 export default function Dashboard() {
@@ -71,18 +71,12 @@ export default function Dashboard() {
 
       {/* Main */}
       <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div class="flex items-center justify-between mb-6">
-          <div>
-            <h2 class="text-2xl font-bold text-white">Tasks</h2>
-            <p class="text-gray-400 text-sm mt-1">Manage your agent loop tasks</p>
-          </div>
-          <div class="flex items-center gap-2 text-sm text-gray-400">
-            <span>Auto-refreshing every 10s</span>
-            <Button pattern="ghost" onClick={() => refetch()} title="Refresh now" icon={
-              <RefreshIcon />
-            } />
-          </div>
-        </div>
+        <PageHeader title="Tasks" description="Manage your agent loop tasks">
+          <span>Auto-refreshing every 10s</span>
+          <Button pattern="ghost" onClick={() => refetch()} title="Refresh now" icon={
+            <RefreshIcon />
+          } />
+        </PageHeader>
 
         {/* Loading state */}
         {tasks.loading && !tasks() && (

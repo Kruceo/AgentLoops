@@ -35,6 +35,8 @@ func (a *OpencodeAgent) Run(ctx context.Context, workDir string, initMessage str
 		args = append(args, "--model", model)
 	}
 
+	args = append(args, "--dangerously-skip-permissions")
+
 	args = append(args, initMessage)
 
 	cmd := exec.CommandContext(ctx, "opencode", args...)

@@ -1,4 +1,5 @@
 import { A } from "@solidjs/router";
+import { NoHydration } from "solid-js/web";
 
 export default function NotFound() {
   return (
@@ -13,9 +14,11 @@ export default function NotFound() {
           href="/"
           class="inline-flex items-center gap-2 px-6 py-3 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-colors"
         >
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
-          </svg>
+          <NoHydration>
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+            </svg>
+          </NoHydration>
           Back to Dashboard
         </A>
       </div>
