@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"unicode"
 )
 
 // OpencodeAgent implements the Agent interface for the `opencode` CLI tool.
@@ -97,7 +98,7 @@ func (a *OpencodeAgent) GetModes() ([]string, error) {
 // e.g. "build (primary)", "chat (primary)", "code-reviewer (subagent)".
 func parseModes(output string) []string {
 	lines := strings.Split(output, "\n")
-	var result []string
+	result := make([]string, 0)
 	seen := map[string]bool{}
 	for _, line := range lines {
 		// Only consider non-indented lines (mode headers)
@@ -108,6 +109,9 @@ func parseModes(output string) []string {
 		fields := strings.Fields(line)
 		if len(fields) > 0 {
 			name := fields[0]
+			if len(name) > 0 && !unicode.IsLetter(rune(name[0])) {
+				continue
+			}
 			if !seen[name] {
 				seen[name] = true
 				result = append(result, name)
@@ -126,7 +130,7 @@ func (a *OpencodeAgent) IsInstalled() bool {
 // parseLines splits a multi-line string into a slice of non-empty trimmed lines.
 func parseLines(output string) []string {
 	lines := strings.Split(strings.TrimSpace(output), "\n")
-	var result []string
+	result := make([]string, 0)
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line != "" {

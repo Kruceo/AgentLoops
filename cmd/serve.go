@@ -32,6 +32,7 @@ func init() {
 	rootCmd.AddCommand(serveCmd)
 
 	serveCmd.Flags().String("port", "", "Port to listen on (default: 8080 or PORT env var)")
+	serveCmd.Flags().String("address", "", "Bind address (default: 0.0.0.0 or ADDRESS env var)")
 	serveCmd.Flags().String("data-dir", "", "Data directory for database (default: ./data or DATA_DIR env var)")
 }
 
@@ -43,6 +44,14 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	if port == "" {
 		port = "8080"
+	}
+
+	address, _ := cmd.Flags().GetString("address")
+	if address == "" {
+		address = os.Getenv("ADDRESS")
+	}
+	if address == "" {
+		address = "0.0.0.0"
 	}
 
 	dataDir, _ := cmd.Flags().GetString("data-dir")

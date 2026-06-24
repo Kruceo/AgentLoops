@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	"agentloops/core/agents"
 	"agentloops/core/tasks"
 )
@@ -79,7 +81,8 @@ func (s *Scheduler) Stop() {
 
 // RunTaskNow runs a specific task immediately and returns the Run record.
 // Returns an error if the task is already running.
-func (s *Scheduler) RunTaskNow(ctx context.Context, task *tasks.Task) (*tasks.Run, error) {
+// If runID is empty, a new UUID will be generated for the run.
+func (s *Scheduler) RunTaskNow(ctx context.Context, task *tasks.Task, runID string) (*tasks.Run, error) {
 	if !s.tryAcquireTask(task.ID) {
 		return nil, fmt.Errorf("task %q is already running", task.TaskName)
 	}
@@ -90,7 +93,12 @@ func (s *Scheduler) RunTaskNow(ctx context.Context, task *tasks.Task) (*tasks.Ru
 		return nil, fmt.Errorf("get agent %s: %w", task.AgentRunner, err)
 	}
 
+	if runID == "" {
+		runID = uuid.New().String()
+	}
+
 	run := &tasks.Run{
+		ID:        runID,
 		TaskID:    task.ID,
 		StartedAt: time.Now().UTC(),
 	}
@@ -127,6 +135,84 @@ func (s *Scheduler) RunTaskNow(ctx context.Context, task *tasks.Task) (*tasks.Ru
 	return run, nil
 }
 
+// StreamEvent represents a single event in an SSE stream of task execution.
+type StreamEvent struct {
+	Type    string `json:"type"`              // "output", "done", "error"
+	Content string `json:"content,omitempty"` // for "output" and "error" events
+	Status  string `json:"status,omitempty"`  // for "done" events: "success" | "error"
+	RunID   string `json:"run_id,omitempty"`  // for "done" events
+}
+
+// RunStream runs a specific task immediately and streams execution events.
+// It returns a channel of StreamEvent that is closed when execution finishes.
+func (s *Scheduler) RunStream(ctx context.Context, task *tasks.Task) <-chan StreamEvent {
+	eventCh := make(chan StreamEvent, 1)
+
+	go func() {
+		defer close(eventCh)
+
+		if !s.tryAcquireTask(task.ID) {
+			eventCh <- StreamEvent{Type: "error", Content: fmt.Sprintf("task %q is already running", task.TaskName)}
+			return
+		}
+		defer s.releaseTask(task.ID)
+
+		agent, err := s.agentMgr.Get(task.AgentRunner)
+		if err != nil {
+			eventCh <- StreamEvent{Type: "error", Content: fmt.Sprintf("get agent %s: %v", task.AgentRunner, err)}
+			return
+		}
+
+		runID := uuid.New().String()
+		run := &tasks.Run{
+			ID:        runID,
+			TaskID:    task.ID,
+			StartedAt: time.Now().UTC(),
+		}
+
+		log.Printf("scheduler: streaming task %q (id=%s, run=%s) with agent %s", task.TaskName, task.ID, runID, task.AgentRunner)
+
+		workDir := task.WorkDir
+		if workDir == "" {
+			workDir = s.workDir
+		}
+
+		output, err := agent.Run(ctx, workDir, task.InitMessage, task.AgentModel, task.AgentMode)
+		if err != nil {
+			run.HasError = true
+			run.Output = fmt.Sprintf("error: %v", err)
+			eventCh <- StreamEvent{Type: "error", Content: err.Error()}
+			log.Printf("scheduler: streaming task %q failed: %v", task.TaskName, err)
+		} else {
+			run.Output = output
+			eventCh <- StreamEvent{Type: "output", Content: output}
+			log.Printf("scheduler: streaming task %q completed successfully", task.TaskName)
+		}
+
+		now := time.Now().UTC()
+		run.FinishedAt = &now
+
+		status := "success"
+		if run.HasError {
+			status = "error"
+		}
+
+		// Persist the run
+		if persistErr := s.runRepo.Create(run); persistErr != nil {
+			log.Printf("scheduler: error saving run for task %q: %v", task.TaskName, persistErr)
+		}
+
+		// Update last run time
+		s.mu.Lock()
+		s.lastRun[task.ID] = now
+		s.mu.Unlock()
+
+		eventCh <- StreamEvent{Type: "done", Status: status, RunID: runID}
+	}()
+
+	return eventCh
+}
+
 // tryAcquireTask atomically checks and sets the running flag for a task.
 // Returns true if the task was NOT running and has been acquired.
 func (s *Scheduler) tryAcquireTask(taskID string) bool {
@@ -146,8 +232,8 @@ func (s *Scheduler) releaseTask(taskID string) {
 	s.mu.Unlock()
 }
 
-// isTaskRunning checks whether a task is currently executing (lock-free read under mutex).
-func (s *Scheduler) isTaskRunning(taskID string) bool {
+// IsTaskRunning checks whether a task is currently executing (lock-free read under mutex).
+func (s *Scheduler) IsTaskRunning(taskID string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.taskRunning[taskID]
@@ -182,7 +268,7 @@ func (s *Scheduler) executeDueTasks() {
 		interval := time.Duration(t.IntervalSeconds) * time.Second
 		if now.Sub(lastTime) >= interval {
 			// Skip if already running (RunTaskNow will also guard at acquire level)
-			if s.isTaskRunning(t.ID) {
+			if s.IsTaskRunning(t.ID) {
 				log.Printf("scheduler: task %q is still running, skipping this tick", t.TaskName)
 				continue
 			}
@@ -192,7 +278,7 @@ func (s *Scheduler) executeDueTasks() {
 				ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 				defer cancel()
 
-				if _, err := s.RunTaskNow(ctx, &task); err != nil {
+				if _, err := s.RunTaskNow(ctx, &task, ""); err != nil {
 					log.Printf("scheduler: error running task %q: %v", task.TaskName, err)
 				}
 			}(t)

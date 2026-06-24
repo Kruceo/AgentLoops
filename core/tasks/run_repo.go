@@ -49,6 +49,30 @@ func (r *RunRepository) Create(run *Run) error {
 	return nil
 }
 
+// Update modifies an existing run record in the database.
+func (r *RunRepository) Update(run *Run) error {
+	hasError := 0
+	if run.HasError {
+		hasError = 1
+	}
+
+	var finishedAt interface{}
+	if run.FinishedAt != nil {
+		finishedAt = run.FinishedAt.UTC().Format("2006-01-02 15:04:05")
+	}
+
+	query := `UPDATE runs
+		SET output = ?, has_error = ?, finished_at = ?
+		WHERE id = ?`
+
+	_, err := r.db.Exec(query, run.Output, hasError, finishedAt, run.ID)
+	if err != nil {
+		return fmt.Errorf("update run: %w", err)
+	}
+
+	return nil
+}
+
 // GetByID retrieves a run by its ID.
 func (r *RunRepository) GetByID(id string) (*Run, error) {
 	query := `SELECT id, task_id, output, has_error, started_at, finished_at

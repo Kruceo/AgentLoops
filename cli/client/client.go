@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -9,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -36,19 +38,19 @@ type AgentDetail struct {
 
 // Task represents a task from the API.
 type Task struct {
-	ID              string     `json:"id"`
-	TaskName        string     `json:"taskName"`
-	InitMessage     string     `json:"initMessage"`
-	AgentRunner     string     `json:"agentRunner"`
-	AgentModel      string     `json:"agentModel"`
-	AgentMode       string     `json:"agentMode"`
-	WorkDir         string     `json:"workDir"`
-	Enabled         bool       `json:"enabled"`
-	CronExpr        string     `json:"cronExpr"`
-	IntervalSeconds int        `json:"intervalSeconds"`
-	CreatedAt       time.Time  `json:"createdAt"`
-	UpdatedAt       time.Time  `json:"updatedAt"`
-	LastRunStatus   *string    `json:"lastRunStatus,omitempty"`
+	ID              string    `json:"id"`
+	TaskName        string    `json:"taskName"`
+	InitMessage     string    `json:"initMessage"`
+	AgentRunner     string    `json:"agentRunner"`
+	AgentModel      string    `json:"agentModel"`
+	AgentMode       string    `json:"agentMode"`
+	WorkDir         string    `json:"workDir"`
+	Enabled         bool      `json:"enabled"`
+	CronExpr        string    `json:"cronExpr"`
+	IntervalSeconds int       `json:"intervalSeconds"`
+	CreatedAt       time.Time `json:"createdAt"`
+	UpdatedAt       time.Time `json:"updatedAt"`
+	LastRunStatus   *string   `json:"lastRunStatus,omitempty"`
 }
 
 // CreateTaskRequest represents the request body for creating a task.
@@ -208,4 +210,64 @@ func (c *Client) GetTask(ctx context.Context, id string) (*Task, error) {
 func (c *Client) HealthCheck(ctx context.Context) error {
 	var result map[string]string
 	return c.doRequest(ctx, http.MethodGet, "/api/health", nil, &result)
+}
+
+// SSEEvent represents a single Server-Sent Event from the task stream.
+type SSEEvent struct {
+	Type    string `json:"type"`
+	Content string `json:"content,omitempty"`
+	Status  string `json:"status,omitempty"`
+	RunID   string `json:"run_id,omitempty"`
+}
+
+// StartTaskStream triggers immediate execution of a task and returns a channel
+// of SSE events streamed from the server.
+func (c *Client) StartTaskStream(ctx context.Context, taskID string) (<-chan SSEEvent, error) {
+	endpoint := c.baseURL + "/api/tasks/" + url.PathEscape(taskID) + "/start"
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// For SSE, use a longer timeout.
+	streamClient := &http.Client{Timeout: 30 * time.Minute}
+	resp, err := streamClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return nil, fmt.Errorf("server returned %d: %s", resp.StatusCode, string(body))
+	}
+
+	ch := make(chan SSEEvent, 100)
+
+	go func() {
+		defer close(ch)
+		defer resp.Body.Close()
+
+		scanner := bufio.NewScanner(resp.Body)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if strings.HasPrefix(line, "data: ") {
+				var event SSEEvent
+				if err := json.Unmarshal([]byte(line[6:]), &event); err != nil {
+					continue
+				}
+				select {
+				case ch <- event:
+				case <-ctx.Done():
+					return
+				}
+				if event.Type == "done" || event.Type == "error" {
+					return
+				}
+			}
+		}
+	}()
+
+	return ch, nil
 }
