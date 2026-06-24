@@ -24,39 +24,7 @@ func init() {
 	taskCmd.AddCommand(taskStartCmd)
 }
 
-func runTaskStart(command *cobra.Command, args []string) error {
-	serverURL := getServerURL(command)
-
-	if len(args) == 0 {
-		output, runID, err := tui.RunStartTaskTUI(serverURL)
-		if err != nil {
-			// Print error info to terminal
-			if runID != "" {
-				printError(fmt.Sprintf("Task failed (run: %s)", runID))
-			}
-			return err
-		}
-		// Print success info to terminal
-		if runID != "" {
-			printSuccess(fmt.Sprintf("Task completed successfully (run: %s)", runID))
-		}
-		if output != "" {
-			fmt.Println(output)
-		}
-		return nil
-	}
-
-	taskID := args[0]
-	c := client.NewClient(serverURL)
-
-	printInfo(fmt.Sprintf("Starting task %s...", taskID))
-
-	ctx := context.Background()
-	eventCh, err := c.StartTaskStream(ctx, taskID)
-	if err != nil {
-		return fmt.Errorf("failed to start task: %w", err)
-	}
-
+func streamEventsToStdout(eventCh <-chan client.SSEEvent) error {
 	for event := range eventCh {
 		switch event.Type {
 		case "output":
@@ -71,6 +39,31 @@ func runTaskStart(command *cobra.Command, args []string) error {
 			return fmt.Errorf("task failed (run: %s)", event.RunID)
 		}
 	}
-
 	return nil
+}
+
+func runTaskStart(command *cobra.Command, args []string) error {
+	serverURL := getServerURL(command)
+
+	if len(args) == 0 {
+		eventCh, err := tui.RunStartTaskTUI(serverURL)
+		if err != nil {
+			return err
+		}
+		printInfo("Starting task...")
+		return streamEventsToStdout(eventCh)
+	}
+
+	taskID := args[0]
+	c := client.NewClient(serverURL)
+
+	printInfo(fmt.Sprintf("Starting task %s...", taskID))
+
+	ctx := context.Background()
+	eventCh, err := c.StartTaskStream(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("failed to start task: %w", err)
+	}
+
+	return streamEventsToStdout(eventCh)
 }

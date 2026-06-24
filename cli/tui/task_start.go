@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 
 	"charm.land/bubbles/v2/list"
@@ -16,8 +17,6 @@ import (
 const (
 	stepTaskSelect int = iota
 	stepConnecting
-	stepRunning
-	stepTaskDone
 )
 
 // TaskStartModel is the Bubble Tea model for the TUI-first task start flow.
@@ -33,11 +32,10 @@ type TaskStartModel struct {
 
 	// Streaming
 	spinner    spinner.Model
-	output     strings.Builder
-	runID      string
 	finalError string
 	quitting   bool
 	eventCh    <-chan client.SSEEvent
+	StreamCh   <-chan client.SSEEvent // Export the channel for the caller after connection
 
 	// API
 	client *client.Client
@@ -101,12 +99,6 @@ type streamConnectedMsg struct {
 	err     error
 }
 
-type streamEventMsg struct {
-	event client.SSEEvent
-	done  bool
-	err   error
-}
-
 // --- Init ---
 
 func (m TaskStartModel) Init() tea.Cmd {
@@ -125,25 +117,14 @@ func (m TaskStartModel) fetchTasks() tea.Cmd {
 
 func (m TaskStartModel) connectStream(taskID string) tea.Cmd {
 	return func() tea.Msg {
+		log.Printf("[DEBUG-TUI] connecting stream for task %s", taskID)
 		eventCh, err := m.client.StartTaskStream(context.Background(), taskID)
 		if err != nil {
+			log.Printf("[DEBUG-TUI] stream connection failed: %v", err)
 			return streamConnectedMsg{err: err}
 		}
+		log.Printf("[DEBUG-TUI] stream connected, eventCh=%p", eventCh)
 		return streamConnectedMsg{eventCh: eventCh}
-	}
-}
-
-func (m TaskStartModel) readNextEvent() tea.Cmd {
-	return func() tea.Msg {
-		if m.eventCh == nil {
-			return streamEventMsg{done: true}
-		}
-		event, ok := <-m.eventCh
-		if !ok {
-			return streamEventMsg{done: true}
-		}
-		done := event.Type == "done" || event.Type == "error"
-		return streamEventMsg{event: event, done: done}
 	}
 }
 
@@ -206,40 +187,12 @@ func (m TaskStartModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case streamConnectedMsg:
 		if msg.err != nil {
 			m.finalError = msg.err.Error()
-			m.step = stepTaskDone
 			return m, tea.Quit
 		}
+		log.Printf("[DEBUG-TUI] streamConnectedMsg handler: connected, quitting TUI")
 		m.eventCh = msg.eventCh
-		m.step = stepRunning
-		return m, tea.Batch(m.spinner.Tick, m.readNextEvent())
-
-	case streamEventMsg:
-		if msg.err != nil {
-			m.finalError = msg.err.Error()
-			m.step = stepTaskDone
-			return m, tea.Quit
-		}
-
-		if msg.event.Type == "output" {
-			m.output.WriteString(msg.event.Content)
-		} else if msg.event.Type == "error" {
-			m.finalError = msg.event.Content
-		} else if msg.event.Type == "done" {
-			m.runID = msg.event.RunID
-			if msg.event.Status != "success" {
-				if m.finalError == "" {
-					m.finalError = "task failed"
-				}
-			}
-		}
-
-		if msg.done {
-			m.step = stepTaskDone
-			return m, tea.Quit
-		}
-
-		// Read next event from the stream.
-		return m, m.readNextEvent()
+		m.StreamCh = msg.eventCh
+		return m, tea.Quit
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -253,8 +206,6 @@ func (m TaskStartModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m TaskStartModel) selectTask() (tea.Model, tea.Cmd) {
 	if i, ok := m.taskList.SelectedItem().(taskListItem); ok {
 		m.step = stepConnecting
-		m.output.Reset()
-		m.runID = ""
 		m.finalError = ""
 		m.err = nil
 		return m, m.connectStream(i.task.ID)
@@ -274,10 +225,6 @@ func (m TaskStartModel) View() tea.View {
 		return m.viewTaskSelect()
 	case stepConnecting:
 		return m.viewConnecting()
-	case stepRunning:
-		return m.viewRunning()
-	case stepTaskDone:
-		return m.viewDone()
 	}
 
 	return tea.NewView("")
@@ -325,75 +272,22 @@ func (m TaskStartModel) viewConnecting() tea.View {
 	return v
 }
 
-func (m TaskStartModel) viewRunning() tea.View {
-	var b strings.Builder
-
-	b.WriteString("\n")
-	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6")).Render("  ➜ Running Task"))
-	b.WriteString("\n\n")
-	b.WriteString(fmt.Sprintf("  %s Streaming output...\n", m.spinner.View()))
-	b.WriteString("\n")
-
-	out := m.output.String()
-	if out != "" {
-		b.WriteString("  " + strings.ReplaceAll(out, "\n", "\n  "))
-		b.WriteString("\n")
-	}
-
-	v := tea.NewView(b.String())
-	v.AltScreen = true
-	return v
-}
-
-func (m TaskStartModel) viewDone() tea.View {
-	var b strings.Builder
-
-	b.WriteString("\n")
-	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6")).Render("  ➜ Task Result"))
-	b.WriteString("\n\n")
-
-	out := m.output.String()
-	if out != "" {
-		b.WriteString("  " + strings.ReplaceAll(out, "\n", "\n  "))
-		b.WriteString("\n\n")
-	}
-
-	if m.finalError != "" {
-		b.WriteString(errorStyle.Render("  ✗ " + m.finalError))
-		if m.runID != "" {
-			b.WriteString(errorStyle.Render(fmt.Sprintf(" (run: %s)", m.runID)))
-		}
-		b.WriteString("\n")
-
-		v := tea.NewView(b.String())
-		v.AltScreen = true
-		return v
-	}
-
-	b.WriteString(successStyle.Render("  ✓ Task completed successfully"))
-	if m.runID != "" {
-		b.WriteString(successStyle.Render(fmt.Sprintf(" (run: %s)", m.runID)))
-	}
-	b.WriteString("\n")
-
-	v := tea.NewView(b.String())
-	v.AltScreen = true
-	return v
-}
-
-// RunStartTaskTUI launches the interactive task-start TUI and returns the final result.
-func RunStartTaskTUI(serverURL string) (output string, runID string, err error) {
+// RunStartTaskTUI launches the interactive task-start TUI and returns the connected SSE event channel.
+func RunStartTaskTUI(serverURL string) (<-chan client.SSEEvent, error) {
 	m := NewTaskStartModel(serverURL)
 	program := tea.NewProgram(m)
 
 	finalModel, runErr := program.Run()
 	if runErr != nil {
-		return "", "", fmt.Errorf("TUI error: %w", runErr)
+		return nil, fmt.Errorf("TUI error: %w", runErr)
 	}
 
 	fm := finalModel.(TaskStartModel)
 	if fm.finalError != "" {
-		return fm.output.String(), fm.runID, fmt.Errorf("%s", fm.finalError)
+		return nil, fmt.Errorf("%s", fm.finalError)
 	}
-	return fm.output.String(), fm.runID, fm.err
+	if fm.StreamCh == nil {
+		return nil, fmt.Errorf("no stream channel (user cancelled)")
+	}
+	return fm.StreamCh, nil
 }
