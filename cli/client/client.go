@@ -257,12 +257,8 @@ func (c *Client) StartTaskStream(ctx context.Context, taskID string) (<-chan SSE
 				if err := json.Unmarshal([]byte(line[6:]), &event); err != nil {
 					continue
 				}
-				select {
-				case ch <- event:
-				case <-ctx.Done():
-					return
-				}
-				if event.Type == "done" || event.Type == "error" {
+				ch <- event
+				if event.Type == "done" {
 					return
 				}
 			}

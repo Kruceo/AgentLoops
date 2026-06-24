@@ -28,8 +28,22 @@ func runTaskStart(command *cobra.Command, args []string) error {
 	serverURL := getServerURL(command)
 
 	if len(args) == 0 {
-		_, _, err := tui.RunStartTaskTUI(serverURL)
-		return err
+		output, runID, err := tui.RunStartTaskTUI(serverURL)
+		if err != nil {
+			// Print error info to terminal
+			if runID != "" {
+				printError(fmt.Sprintf("Task failed (run: %s)", runID))
+			}
+			return err
+		}
+		// Print success info to terminal
+		if runID != "" {
+			printSuccess(fmt.Sprintf("Task completed successfully (run: %s)", runID))
+		}
+		if output != "" {
+			fmt.Println(output)
+		}
+		return nil
 	}
 
 	taskID := args[0]

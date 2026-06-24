@@ -15,6 +15,7 @@ import (
 
 const (
 	stepTaskSelect int = iota
+	stepConnecting
 	stepRunning
 	stepTaskDone
 )
@@ -176,6 +177,12 @@ func (m TaskStartModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var cmd tea.Cmd
 			m.taskList, cmd = m.taskList.Update(msg)
 			return m, cmd
+		case stepConnecting:
+			if msg.String() == "esc" {
+				m.quitting = true
+				return m, tea.Quit
+			}
+			return m, nil
 		}
 		return m, nil
 
@@ -245,6 +252,7 @@ func (m TaskStartModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m TaskStartModel) selectTask() (tea.Model, tea.Cmd) {
 	if i, ok := m.taskList.SelectedItem().(taskListItem); ok {
+		m.step = stepConnecting
 		m.output.Reset()
 		m.runID = ""
 		m.finalError = ""
@@ -264,6 +272,8 @@ func (m TaskStartModel) View() tea.View {
 	switch m.step {
 	case stepTaskSelect:
 		return m.viewTaskSelect()
+	case stepConnecting:
+		return m.viewConnecting()
 	case stepRunning:
 		return m.viewRunning()
 	case stepTaskDone:
@@ -298,6 +308,18 @@ func (m TaskStartModel) viewTaskSelect() tea.View {
 	b.WriteString(hintStyle.Render("  ↑↓: navigate  Enter: start  /: filter  Esc: quit  Ctrl+C: quit"))
 	b.WriteString("\n")
 
+	v := tea.NewView(b.String())
+	v.AltScreen = true
+	return v
+}
+
+func (m TaskStartModel) viewConnecting() tea.View {
+	var b strings.Builder
+	b.WriteString("\n")
+	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6")).Render("  ➜ Start Task"))
+	b.WriteString("\n\n")
+	b.WriteString(fmt.Sprintf("  %s Connecting to server...\n", m.spinner.View()))
+	b.WriteString("\n")
 	v := tea.NewView(b.String())
 	v.AltScreen = true
 	return v
