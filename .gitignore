@@ -1,12 +1,9 @@
 # Dependencies
-server/tmp/
-server/data/
+tmp/
+data/
 
 # Build output
 dist/
-web/.output/
-web/dist/
-web/.vinxi/
 
 # Environment
 .env
@@ -20,9 +17,7 @@ Thumbs.db
 test*.sh
 scripts/
 plan.md
-
-# Node
-web/node_modules/
+*plan.md
 
 # Backups
 *.bak
@@ -32,3 +27,6 @@ web/node_modules/
 .vscode/
 *.swp
 *.swo
+
+# Node / Web archive
+node_modules/
