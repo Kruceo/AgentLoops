@@ -451,6 +451,9 @@ func (h *Handler) RunTaskStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
+	// Flush headers immediately so the client receives the 200 OK
+	// without waiting for the first event or keepalive tick.
+	flusher.Flush()
 
 	eventCh := h.Scheduler.RunStream(r.Context(), task)
 

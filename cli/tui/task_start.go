@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 
 	"charm.land/bubbles/v2/list"
@@ -117,13 +116,10 @@ func (m TaskStartModel) fetchTasks() tea.Cmd {
 
 func (m TaskStartModel) connectStream(taskID string) tea.Cmd {
 	return func() tea.Msg {
-		log.Printf("[DEBUG-TUI] connecting stream for task %s", taskID)
 		eventCh, err := m.client.StartTaskStream(context.Background(), taskID)
 		if err != nil {
-			log.Printf("[DEBUG-TUI] stream connection failed: %v", err)
 			return streamConnectedMsg{err: err}
 		}
-		log.Printf("[DEBUG-TUI] stream connected, eventCh=%p", eventCh)
 		return streamConnectedMsg{eventCh: eventCh}
 	}
 }
@@ -189,7 +185,6 @@ func (m TaskStartModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.finalError = msg.err.Error()
 			return m, tea.Quit
 		}
-		log.Printf("[DEBUG-TUI] streamConnectedMsg handler: connected, quitting TUI")
 		m.eventCh = msg.eventCh
 		m.StreamCh = msg.eventCh
 		return m, tea.Quit
