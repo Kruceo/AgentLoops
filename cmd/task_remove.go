@@ -10,7 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"agentloops/internal/api"
+	"agentloops/cli/client"
 )
 
 // taskRemoveCmd represents the task remove command
@@ -33,18 +33,18 @@ func runTaskRemove(cmd *cobra.Command, args []string) error {
 	force, _ := cmd.Flags().GetBool("force")
 
 	serverURL := getServerURL(cmd)
-	client := api.NewClient(serverURL)
+	apiClient := client.NewClient(serverURL)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	// Health check
-	if err := client.HealthCheck(ctx); err != nil {
+	if err := apiClient.HealthCheck(ctx); err != nil {
 		return fmt.Errorf("cannot connect to server at %s: %w", serverURL, err)
 	}
 
 	// First, get the task to show details
-	task, err := client.GetTask(ctx, taskID)
+	task, err := apiClient.GetTask(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("task not found: %w", err)
 	}
@@ -71,7 +71,7 @@ func runTaskRemove(cmd *cobra.Command, args []string) error {
 	}
 
 	// Delete the task
-	if err := client.DeleteTask(ctx, taskID); err != nil {
+	if err := apiClient.DeleteTask(ctx, taskID); err != nil {
 		return fmt.Errorf("failed to delete task: %w", err)
 	}
 

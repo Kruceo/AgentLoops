@@ -7,7 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
 
-	"agentloops/internal/tui"
+	"agentloops/cli/tui"
 )
 
 // taskAddCmd represents the task add command

@@ -16,7 +16,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"agentloops/internal/api"
+	"agentloops/cli/client"
 )
 
 var (
@@ -102,7 +102,7 @@ type WizardModel struct {
 	selectedMode  string
 
 	// Data from API
-	agents []api.AgentInfo
+	agents []client.AgentInfo
 	models []string
 	modes  []string
 
@@ -114,10 +114,10 @@ type WizardModel struct {
 	modesLoaded  bool
 
 	// API client
-	client *api.Client
+	client *client.Client
 
 	// Result
-	CreatedTask *api.Task
+	CreatedTask *client.Task
 }
 
 // NewWizardModel creates a new wizard model.
@@ -196,7 +196,7 @@ func NewWizardModel(serverURL string) WizardModel {
 		filePicker:       fp,
 		intervalInput:    interval,
 		spinner:          s,
-		client:           api.NewClient(serverURL),
+		client:           client.NewClient(serverURL),
 		agentList:        agentList,
 		modelList:        modelList,
 		modeList:         modeList,
@@ -205,7 +205,7 @@ func NewWizardModel(serverURL string) WizardModel {
 
 // agentListItem wraps an AgentInfo for use in list.Model.
 type agentListItem struct {
-	info api.AgentInfo
+	info client.AgentInfo
 }
 
 func (i agentListItem) Title() string {
@@ -239,7 +239,7 @@ func (i stringListItem) FilterValue() string { return i.value }
 // --- Bubble Tea messages ---
 
 type agentsLoadedMsg struct {
-	agents []api.AgentInfo
+	agents []client.AgentInfo
 	err    error
 }
 
@@ -254,7 +254,7 @@ type modesLoadedMsg struct {
 }
 
 type taskCreatedMsg struct {
-	task *api.Task
+	task *client.Task
 	err  error
 }
 
@@ -297,7 +297,7 @@ func (m WizardModel) fetchModes(agentID string) tea.Cmd {
 
 func (m WizardModel) createTask() tea.Cmd {
 	return func() tea.Msg {
-		req := api.CreateTaskRequest{
+		req := client.CreateTaskRequest{
 			TaskName:        m.taskNameInput.Value(),
 			InitMessage:     m.initMessageInput.Value(),
 			AgentRunner:     m.selectedAgent,

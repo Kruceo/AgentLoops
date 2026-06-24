@@ -13,7 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"agentloops/api"
+	"agentloops/cli/server"
 	"agentloops/core/agents"
 	"agentloops/core/db"
 	"agentloops/core/scheduler"
@@ -91,7 +91,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	sched := scheduler.New(taskRepo, runRepo, agentMgr, workDir)
 
 	// --- API Handler ---
-	handler := &api.Handler{
+	handler := &server.Handler{
 		DB:        database,
 		Tasks:     taskRepo,
 		Runs:      runRepo,
@@ -101,7 +101,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// --- HTTP Server ---
 	addr := fmt.Sprintf(":%s", port)
-	httpServer := api.NewServer(addr, handler)
+	httpServer := server.NewServer(addr, handler)
 
 	// --- Start Scheduler ---
 	go sched.Start()

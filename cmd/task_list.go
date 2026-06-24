@@ -9,7 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/spf13/cobra"
 
-	"agentloops/internal/api"
+	"agentloops/cli/client"
 )
 
 // taskListCmd represents the task list command
@@ -29,17 +29,17 @@ func init() {
 
 func runTaskList(cmd *cobra.Command, args []string) error {
 	serverURL := getServerURL(cmd)
-	client := api.NewClient(serverURL)
+	apiClient := client.NewClient(serverURL)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	// Health check
-	if err := client.HealthCheck(ctx); err != nil {
+	if err := apiClient.HealthCheck(ctx); err != nil {
 		return fmt.Errorf("cannot connect to server at %s: %w", serverURL, err)
 	}
 
-	tasks, err := client.ListTasks(ctx)
+	tasks, err := apiClient.ListTasks(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to list tasks: %w", err)
 	}
@@ -47,7 +47,7 @@ func runTaskList(cmd *cobra.Command, args []string) error {
 	// Filter enabled only if requested
 	enabledOnly, _ := cmd.Flags().GetBool("enabled-only")
 	if enabledOnly {
-		var filtered []api.Task
+		var filtered []client.Task
 		for _, t := range tasks {
 			if t.Enabled {
 				filtered = append(filtered, t)
@@ -66,7 +66,7 @@ func runTaskList(cmd *cobra.Command, args []string) error {
 	return printTasksTable(tasks)
 }
 
-func printTasksJSON(tasks []api.Task) error {
+func printTasksJSON(tasks []client.Task) error {
 	data, err := json.MarshalIndent(tasks, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal tasks: %w", err)
@@ -75,7 +75,7 @@ func printTasksJSON(tasks []api.Task) error {
 	return nil
 }
 
-func printTasksTable(tasks []api.Task) error {
+func printTasksTable(tasks []client.Task) error {
 	if len(tasks) == 0 {
 		printInfo("No tasks found")
 		return nil
