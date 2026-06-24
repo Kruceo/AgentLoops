@@ -36,6 +36,7 @@ type TaskStartModel struct {
 	runID      string
 	finalError string
 	quitting   bool
+	eventCh    <-chan client.SSEEvent
 
 	// API
 	client *client.Client
@@ -94,6 +95,11 @@ type tasksLoadedMsg struct {
 	err   error
 }
 
+type streamConnectedMsg struct {
+	eventCh <-chan client.SSEEvent
+	err     error
+}
+
 type streamEventMsg struct {
 	event client.SSEEvent
 	done  bool
@@ -116,22 +122,27 @@ func (m TaskStartModel) fetchTasks() tea.Cmd {
 	}
 }
 
-func (m TaskStartModel) startStream(taskID string) tea.Cmd {
+func (m TaskStartModel) connectStream(taskID string) tea.Cmd {
 	return func() tea.Msg {
 		eventCh, err := m.client.StartTaskStream(context.Background(), taskID)
 		if err != nil {
-			return streamEventMsg{done: true, err: err}
+			return streamConnectedMsg{err: err}
 		}
+		return streamConnectedMsg{eventCh: eventCh}
+	}
+}
 
-		for event := range eventCh {
-			done := event.Type == "done" || event.Type == "error"
-			msg := streamEventMsg{event: event, done: done}
-			if done {
-				return msg
-			}
+func (m TaskStartModel) readNextEvent() tea.Cmd {
+	return func() tea.Msg {
+		if m.eventCh == nil {
+			return streamEventMsg{done: true}
 		}
-
-		return streamEventMsg{done: true}
+		event, ok := <-m.eventCh
+		if !ok {
+			return streamEventMsg{done: true}
+		}
+		done := event.Type == "done" || event.Type == "error"
+		return streamEventMsg{event: event, done: done}
 	}
 }
 
@@ -185,6 +196,16 @@ func (m TaskStartModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.taskList.SetItems(items)
 		return m, nil
 
+	case streamConnectedMsg:
+		if msg.err != nil {
+			m.finalError = msg.err.Error()
+			m.step = stepTaskDone
+			return m, tea.Quit
+		}
+		m.eventCh = msg.eventCh
+		m.step = stepRunning
+		return m, tea.Batch(m.spinner.Tick, m.readNextEvent())
+
 	case streamEventMsg:
 		if msg.err != nil {
 			m.finalError = msg.err.Error()
@@ -210,8 +231,8 @@ func (m TaskStartModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
-		// Continue streaming.
-		return m, nil
+		// Read next event from the stream.
+		return m, m.readNextEvent()
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -224,12 +245,11 @@ func (m TaskStartModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m TaskStartModel) selectTask() (tea.Model, tea.Cmd) {
 	if i, ok := m.taskList.SelectedItem().(taskListItem); ok {
-		m.step = stepRunning
 		m.output.Reset()
 		m.runID = ""
 		m.finalError = ""
 		m.err = nil
-		return m, m.startStream(i.task.ID)
+		return m, m.connectStream(i.task.ID)
 	}
 	return m, nil
 }
