@@ -7,14 +7,15 @@ import (
 	"github.com/spf13/cobra"
 
 	"agentloops/cli/client"
+	"agentloops/cli/tui"
 )
 
 // taskStartCmd represents the task start command
 var taskStartCmd = &cobra.Command{
-	Use:          "start <task-id>",
+	Use:          "start [task-id]",
 	Short:        "Start a task immediately with streaming output",
-	Long:         `Trigger immediate execution of a task and stream its output to the terminal.`,
-	Args:         cobra.ExactArgs(1),
+	Long:         `Trigger immediate execution of a task and stream its output to the terminal. If no task ID is provided, an interactive TUI lets you choose one.`,
+	Args:         cobra.MaximumNArgs(1),
 	RunE:         runTaskStart,
 	SilenceUsage: true,
 }
@@ -24,9 +25,14 @@ func init() {
 }
 
 func runTaskStart(command *cobra.Command, args []string) error {
-	taskID := args[0]
 	serverURL := getServerURL(command)
 
+	if len(args) == 0 {
+		_, _, err := tui.RunStartTaskTUI(serverURL)
+		return err
+	}
+
+	taskID := args[0]
 	c := client.NewClient(serverURL)
 
 	printInfo(fmt.Sprintf("Starting task %s...", taskID))
