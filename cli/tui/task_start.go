@@ -6,38 +6,26 @@ import (
 	"strings"
 
 	"charm.land/bubbles/v2/list"
-	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
 	"agentloops/cli/client"
 )
 
-const (
-	stepTaskSelect int = iota
-	stepConnecting
-)
-
-// TaskStartModel is the Bubble Tea model for the TUI-first task start flow.
+// TaskStartModel is the Bubble Tea model for the task selection TUI.
+// It lets the user pick a task and returns the task ID.
 type TaskStartModel struct {
-	// State
 	step   int
 	width  int
 	height int
 	err    error
 
-	// Selection
 	taskList list.Model
+	client   *client.Client
 
-	// Streaming
-	spinner    spinner.Model
-	finalError string
-	quitting   bool
-	eventCh    <-chan client.SSEEvent
-	StreamCh   <-chan client.SSEEvent // Export the channel for the caller after connection
-
-	// API
-	client *client.Client
+	// Set when the user selects a task.
+	SelectedTaskID string
+	quitting       bool
 }
 
 // taskListItem wraps a client.Task for use in list.Model.
@@ -65,12 +53,8 @@ func (i taskListItem) FilterValue() string {
 	return i.task.TaskName + " " + i.task.ID
 }
 
-// NewTaskStartModel creates a new TUI model for starting a task.
+// NewTaskStartModel creates a new TUI model for selecting a task.
 func NewTaskStartModel(serverURL string) TaskStartModel {
-	s := spinner.New()
-	s.Spinner = spinner.Dot
-	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
-
 	taskList := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
 	taskList.Title = "Select a Task to Start"
 	taskList.SetShowHelp(false)
@@ -79,8 +63,7 @@ func NewTaskStartModel(serverURL string) TaskStartModel {
 	taskList.SetShowStatusBar(false)
 
 	return TaskStartModel{
-		step:     stepTaskSelect,
-		spinner:  s,
+		step:     0,
 		taskList: taskList,
 		client:   client.NewClient(serverURL),
 	}
@@ -93,34 +76,16 @@ type tasksLoadedMsg struct {
 	err   error
 }
 
-type streamConnectedMsg struct {
-	eventCh <-chan client.SSEEvent
-	err     error
-}
-
 // --- Init ---
 
 func (m TaskStartModel) Init() tea.Cmd {
-	return tea.Batch(
-		m.spinner.Tick,
-		m.fetchTasks(),
-	)
+	return m.fetchTasks()
 }
 
 func (m TaskStartModel) fetchTasks() tea.Cmd {
 	return func() tea.Msg {
 		tasks, err := m.client.ListTasks(context.Background())
 		return tasksLoadedMsg{tasks: tasks, err: err}
-	}
-}
-
-func (m TaskStartModel) connectStream(taskID string) tea.Cmd {
-	return func() tea.Msg {
-		eventCh, err := m.client.StartTaskStream(context.Background(), taskID)
-		if err != nil {
-			return streamConnectedMsg{err: err}
-		}
-		return streamConnectedMsg{eventCh: eventCh}
 	}
 }
 
@@ -140,28 +105,18 @@ func (m TaskStartModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c":
 			m.quitting = true
 			return m, tea.Quit
-		}
-
-		switch m.step {
-		case stepTaskSelect:
-			switch msg.String() {
-			case "enter":
-				return m.selectTask()
-			case "esc":
-				m.quitting = true
+		case "esc":
+			m.quitting = true
+			return m, tea.Quit
+		case "enter":
+			if item, ok := m.taskList.SelectedItem().(taskListItem); ok {
+				m.SelectedTaskID = item.task.ID
 				return m, tea.Quit
 			}
-			var cmd tea.Cmd
-			m.taskList, cmd = m.taskList.Update(msg)
-			return m, cmd
-		case stepConnecting:
-			if msg.String() == "esc" {
-				m.quitting = true
-				return m, tea.Quit
-			}
-			return m, nil
 		}
-		return m, nil
+		var cmd tea.Cmd
+		m.taskList, cmd = m.taskList.Update(msg)
+		return m, cmd
 
 	case list.FilterMatchesMsg:
 		var cmd tea.Cmd
@@ -179,32 +134,8 @@ func (m TaskStartModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.taskList.SetItems(items)
 		return m, nil
-
-	case streamConnectedMsg:
-		if msg.err != nil {
-			m.finalError = msg.err.Error()
-			return m, tea.Quit
-		}
-		m.eventCh = msg.eventCh
-		m.StreamCh = msg.eventCh
-		return m, tea.Quit
-
-	case spinner.TickMsg:
-		var cmd tea.Cmd
-		m.spinner, cmd = m.spinner.Update(msg)
-		return m, cmd
 	}
 
-	return m, nil
-}
-
-func (m TaskStartModel) selectTask() (tea.Model, tea.Cmd) {
-	if i, ok := m.taskList.SelectedItem().(taskListItem); ok {
-		m.step = stepConnecting
-		m.finalError = ""
-		m.err = nil
-		return m, m.connectStream(i.task.ID)
-	}
 	return m, nil
 }
 
@@ -215,17 +146,6 @@ func (m TaskStartModel) View() tea.View {
 		return tea.NewView("\n  Cancelled.\n\n")
 	}
 
-	switch m.step {
-	case stepTaskSelect:
-		return m.viewTaskSelect()
-	case stepConnecting:
-		return m.viewConnecting()
-	}
-
-	return tea.NewView("")
-}
-
-func (m TaskStartModel) viewTaskSelect() tea.View {
 	var b strings.Builder
 
 	b.WriteString("\n")
@@ -255,34 +175,20 @@ func (m TaskStartModel) viewTaskSelect() tea.View {
 	return v
 }
 
-func (m TaskStartModel) viewConnecting() tea.View {
-	var b strings.Builder
-	b.WriteString("\n")
-	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6")).Render("  ➜ Start Task"))
-	b.WriteString("\n\n")
-	b.WriteString(fmt.Sprintf("  %s Connecting to server...\n", m.spinner.View()))
-	b.WriteString("\n")
-	v := tea.NewView(b.String())
-	v.AltScreen = true
-	return v
-}
-
-// RunStartTaskTUI launches the interactive task-start TUI and returns the connected SSE event channel.
-func RunStartTaskTUI(serverURL string) (<-chan client.SSEEvent, error) {
+// RunStartTaskTUI launches the interactive task-selection TUI.
+// Returns the selected task ID, or an empty string if the user cancelled.
+func RunStartTaskTUI(serverURL string) (string, error) {
 	m := NewTaskStartModel(serverURL)
 	program := tea.NewProgram(m)
 
 	finalModel, runErr := program.Run()
 	if runErr != nil {
-		return nil, fmt.Errorf("TUI error: %w", runErr)
+		return "", fmt.Errorf("TUI error: %w", runErr)
 	}
 
 	fm := finalModel.(TaskStartModel)
-	if fm.finalError != "" {
-		return nil, fmt.Errorf("%s", fm.finalError)
+	if fm.err != nil {
+		return "", fm.err
 	}
-	if fm.StreamCh == nil {
-		return nil, fmt.Errorf("no stream channel (user cancelled)")
-	}
-	return fm.StreamCh, nil
+	return fm.SelectedTaskID, nil
 }

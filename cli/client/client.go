@@ -1,7 +1,6 @@
 package client
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -10,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 )
 
@@ -212,58 +210,40 @@ func (c *Client) HealthCheck(ctx context.Context) error {
 	return c.doRequest(ctx, http.MethodGet, "/api/health", nil, &result)
 }
 
-// SSEEvent represents a single Server-Sent Event from the task stream.
-type SSEEvent struct {
-	Type    string `json:"type"`
-	Content string `json:"content,omitempty"`
-	Status  string `json:"status,omitempty"`
-	RunID   string `json:"run_id,omitempty"`
+// Run represents a task run from the API.
+type Run struct {
+	ID         string     `json:"id"`
+	TaskID     string     `json:"taskId"`
+	Output     string     `json:"output"`
+	HasError   bool       `json:"hasError"`
+	StartedAt  time.Time  `json:"startedAt"`
+	FinishedAt *time.Time `json:"finishedAt"`
+	Status     string     `json:"status,omitempty"`
 }
 
-// StartTaskStream triggers immediate execution of a task and returns a channel
-// of SSE events streamed from the server.
-func (c *Client) StartTaskStream(ctx context.Context, taskID string) (<-chan SSEEvent, error) {
-	endpoint := c.baseURL + "/api/tasks/" + url.PathEscape(taskID) + "/start"
+// RunTaskNowResponse represents the response from POST /api/tasks/:id/run.
+type RunTaskNowResponse struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, nil)
+// RunTaskNow triggers an immediate execution of a task.
+// Returns the run ID and status (typically "running" with a 202 response).
+func (c *Client) RunTaskNow(ctx context.Context, taskID string) (*RunTaskNowResponse, error) {
+	var resp RunTaskNowResponse
+	err := c.doRequest(ctx, http.MethodPost, "/api/tasks/"+url.PathEscape(taskID)+"/run", nil, &resp)
 	if err != nil {
 		return nil, err
 	}
+	return &resp, nil
+}
 
-	// For SSE, use a longer timeout.
-	streamClient := &http.Client{Timeout: 30 * time.Minute}
-	resp, err := streamClient.Do(req)
+// GetRun retrieves a run by its ID.
+func (c *Client) GetRun(ctx context.Context, runID string) (*Run, error) {
+	var run Run
+	err := c.doRequest(ctx, http.MethodGet, "/api/runs/"+url.PathEscape(runID), nil, &run)
 	if err != nil {
 		return nil, err
 	}
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		return nil, fmt.Errorf("server returned %d: %s", resp.StatusCode, string(body))
-	}
-
-	ch := make(chan SSEEvent, 100)
-
-	go func() {
-		defer close(ch)
-		defer resp.Body.Close()
-
-		scanner := bufio.NewScanner(resp.Body)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if strings.HasPrefix(line, "data: ") {
-				var event SSEEvent
-				if err := json.Unmarshal([]byte(line[6:]), &event); err != nil {
-					continue
-				}
-				ch <- event
-				if event.Type == "done" {
-					return
-				}
-			}
-		}
-	}()
-
-	return ch, nil
+	return &run, nil
 }

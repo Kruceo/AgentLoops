@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -48,7 +47,6 @@ func (h *Handler) RegisterRoutes(router *Router) {
 	// Task runs
 	router.GET("/api/tasks/:id/runs", h.ListTaskRuns)
 	router.POST("/api/tasks/:id/run", h.RunTaskNow)
-	router.POST("/api/tasks/:id/start", h.RunTaskStream)
 
 	// Runs
 	router.GET("/api/runs", h.ListRuns)
@@ -419,63 +417,6 @@ func (h *Handler) RunTaskNow(w http.ResponseWriter, r *http.Request) {
 		"id":     runID,
 		"status": "running",
 	})
-}
-
-// RunTaskStream triggers an immediate execution of a task and streams
-// execution events via Server-Sent Events.
-func (h *Handler) RunTaskStream(w http.ResponseWriter, r *http.Request) {
-	id := GetParam(r, "id")
-	if id == "" {
-		writeError(w, http.StatusBadRequest, "missing task id")
-		return
-	}
-
-	task, err := h.Tasks.GetByID(id)
-	if err != nil {
-		log.Printf("error getting task: %v", err)
-		writeError(w, http.StatusInternalServerError, "failed to get task")
-		return
-	}
-	if task == nil {
-		writeError(w, http.StatusNotFound, "task not found")
-		return
-	}
-
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		writeError(w, http.StatusInternalServerError, "streaming not supported")
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.WriteHeader(http.StatusOK)
-	// Flush headers immediately so the client receives the 200 OK
-	// without waiting for the first event or keepalive tick.
-	flusher.Flush()
-
-	eventCh := h.Scheduler.RunStream(r.Context(), task)
-
-	ticker := time.NewTicker(15 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case event, ok := <-eventCh:
-			if !ok {
-				return
-			}
-			data, _ := json.Marshal(event)
-			fmt.Fprintf(w, "data: %s\n\n", data)
-			flusher.Flush()
-		case <-ticker.C:
-			fmt.Fprintf(w, ": keepalive\n\n")
-			flusher.Flush()
-		case <-r.Context().Done():
-			return
-		}
-	}
 }
 
 // ListRuns returns all runs across all tasks.

@@ -1,67 +1,72 @@
 package tui
 
 import (
-	"errors"
 	"testing"
-
-	tea "charm.land/bubbletea/v2"
 
 	"agentloops/cli/client"
 )
 
-var errTest = errors.New("connection failed")
-
-func TestTaskStart_StreamConnectedMsg_QuitsAndExportsChannel(t *testing.T) {
-	ch := make(chan client.SSEEvent, 1)
-	m := TaskStartModel{step: stepConnecting}
-
-	mm, cmd := m.Update(streamConnectedMsg{eventCh: ch})
-	m = mm.(TaskStartModel)
-
-	if m.step != stepConnecting {
-		t.Fatalf("expected stepConnecting after connect, got %d", m.step)
+func TestTaskStart_NewModel(t *testing.T) {
+	m := NewTaskStartModel("http://localhost:8080")
+	if m.step != 0 {
+		t.Errorf("expected step 0 (taskSelect), got %d", m.step)
 	}
-	if m.eventCh == nil {
-		t.Fatal("expected eventCh to be set")
-	}
-	if m.StreamCh == nil {
-		t.Fatal("expected StreamCh to be exported")
-	}
-	if m.StreamCh != ch {
-		t.Fatal("expected StreamCh to be the provided channel")
-	}
-
-	// Should return tea.Quit so the TUI exits and hands control back to the caller.
-	if cmd == nil {
-		t.Fatal("expected tea.Quit cmd")
-	}
-	if _, ok := cmd().(tea.QuitMsg); !ok {
-		t.Fatalf("expected cmd to produce tea.QuitMsg, got %T", cmd())
+	if m.client == nil {
+		t.Error("expected client to be set")
 	}
 }
 
-func TestTaskStart_StreamConnectedMsg_ErrorQuits(t *testing.T) {
-	m := TaskStartModel{step: stepConnecting}
-	mm, cmd := m.Update(streamConnectedMsg{err: errTest})
-	m = mm.(TaskStartModel)
-
-	if m.finalError != errTest.Error() {
-		t.Fatalf("expected finalError %q, got %q", errTest.Error(), m.finalError)
+func TestTaskStart_TaskListItem(t *testing.T) {
+	task := client.Task{
+		ID:              "test-id",
+		TaskName:        "Test Task",
+		AgentRunner:     "opencode",
+		IntervalSeconds: 60,
+		Enabled:         true,
 	}
-	if cmd == nil {
-		t.Fatal("expected tea.Quit cmd")
+	item := taskListItem{task: task}
+
+	if item.Title() != "● Test Task" {
+		t.Errorf("expected title '● Test Task', got %q", item.Title())
+	}
+	if item.FilterValue() != "Test Task test-id" {
+		t.Errorf("expected filter 'Test Task test-id', got %q", item.FilterValue())
+	}
+
+	// Test disabled task
+	task.Enabled = false
+	item2 := taskListItem{task: task}
+	if item2.Title() != "○ Test Task" {
+		t.Errorf("expected title '○ Test Task', got %q", item2.Title())
 	}
 }
 
-func TestTaskStart_RunStartTaskTUI_ErrorReturned(t *testing.T) {
-	// An invalid URL won't prevent model creation; the real program would fail
-	// on fetch. Since program.Run() needs a TTY in v2, we only test the helper
-	// surface via direct model updates above.
-	m := NewTaskStartModel("http://localhost:0")
-	if m.step != stepTaskSelect {
-		t.Fatalf("expected stepTaskSelect, got %d", m.step)
+func TestTaskStart_TaskListItemDescription(t *testing.T) {
+	lastRun := "success"
+	task := client.Task{
+		ID:              "test-id",
+		TaskName:        "Test Task",
+		AgentRunner:     "opencode",
+		IntervalSeconds: 120,
+		LastRunStatus:   &lastRun,
 	}
-	if m.StreamCh != nil {
-		t.Fatal("expected StreamCh to be nil before connection")
+	item := taskListItem{task: task}
+
+	desc := item.Description()
+	if desc == "" {
+		t.Fatal("expected non-empty description")
+	}
+}
+
+func TestTaskStart_TaskListItemFilterValue(t *testing.T) {
+	task := client.Task{
+		ID:       "abc-123",
+		TaskName: "My Task",
+	}
+	item := taskListItem{task: task}
+
+	fv := item.FilterValue()
+	if fv != "My Task abc-123" {
+		t.Fatalf("expected 'My Task abc-123', got %q", fv)
 	}
 }
