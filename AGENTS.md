@@ -8,9 +8,9 @@ Branches must follow the tag/name pattern (e.g. feature/dynamic-mosaic).
 
 Allowed branch tags:
 
-- feature - new implementations, something new
-- improvement - improvements that don't add behaviors or fixes (bug fix)
-- chore - repository-only changes, cleanups, workflows, scripts
+- **feature** — genuinely new capabilities that didn't exist before; the user can now do something they couldn't in the previous version.
+- **improvement** — smaller changes that don't introduce new behavior: bug fixes, code improvements, refactors that don't break the current minor (0.x.0) experience, or behavioral tweaks that don't change the outcome.
+- **chore** — repository-level concerns, not application code per se: CI/CD, documentation, scripts, build config.
 
 When working on a branch other than main or dev, use the "wip:" prefix on every commit, e.g. "wip: fix for customers page title"
 
