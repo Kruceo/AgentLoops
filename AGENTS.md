@@ -1,23 +1,38 @@
 # Server
-    - TUI first para opereaçoes CLI Crud based
-    - Server é um comando separado
+    - TUI first for CLI CRUD-based operations
+    - Server is a separate command
 
-# Commits/Branchs
+# Commits/Branches
 
-Branchs devem seguir o padrão tag/name (exemplo: feature/dynamic-mosaic).
+Branches must follow the tag/name pattern (e.g. feature/dynamic-mosaic).
 
-Tags que podem ser usadas em branchs:
+Allowed branch tags:
 
-- feature - novas implementações, algo novo
-- improvement - melhorias que não adicionam comportamentos ou consertos (bug fix)
-- chore - trata apenas do repositorio, limpezas, workflows, scripts
+- feature - new implementations, something new
+- improvement - improvements that don't add behaviors or fixes (bug fix)
+- chore - repository-only changes, cleanups, workflows, scripts
 
-Quando estamos trabalhando em uma branch que não é a main ou dev, devemos utilizar o prefixo "wip:" em cada commit, exemplo: "wip: fix for customers page title"
+When working on a branch other than main or dev, use the "wip:" prefix on every commit, e.g. "wip: fix for customers page title"
 
-Se for um commit direto na main ou dev (hotfixes ou ou parecido), devemos usar os prefixos "fix:" ou "feat:"
+If committing directly to main or dev (hotfixes or similar), use the "fix:" or "feat:" prefixes.
 
-**Mensagens de commit sempre em inglês** (título e corpo), independente do idioma do código ou da conversa.
+**Commit messages must always be in English** (title and body), regardless of the code or conversation language.
 
-**Nunca** adicione planos (estilo md file geralmente) aos commits.
+**Never** add plans (typically md files) to commits.
+**Never** commit compiled binaries.
+
+# Purpose
+
+The idea is for the user to have the daemon running in the background and use the CLI (e.g. "task add" or "task delete") to manage the app.
+That said, it's not CLI-only — we also have an HTTP API, leaving room for anyone who wants to create a Web UI or similar.
+
+# Internal vs Core
+
+[internal](./internal): Responsible for the presentation layer — what the user interacts with, e.g. CLI, TUI, and HTTP API.
+[core](./core/): Responsible for the application domain.
 
 # Core/agents
+
+- Must follow [agents.go](core/agents/agent.go)
+- Prefer insecure mode
+- If a task field is not available (e.g. Hermes doesn't have agent modes like opencode's build/plan), assume a single option called "default" that has no practical effect — just to keep the pattern consistent.
