@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	"agentloops/core/agents"
+	"agentloops/core/runs"
 	"agentloops/core/scheduler"
 	"agentloops/core/tasks"
 )
@@ -24,6 +26,11 @@ type Handler struct {
 	Runs      *tasks.RunRepository
 	Agents    agents.AgentManager
 	Scheduler *scheduler.Scheduler
+}
+
+// getBroadcaster returns the broadcaster from the scheduler.
+func (h *Handler) getBroadcaster() *runs.RunBroadcaster {
+	return h.Scheduler.GetBroadcaster()
 }
 
 // RegisterRoutes registers all API routes on the given router.
@@ -51,6 +58,7 @@ func (h *Handler) RegisterRoutes(router *Router) {
 	// Runs
 	router.GET("/api/runs", h.ListRuns)
 	router.GET("/api/runs/:id", h.GetRun)
+	router.GET("/api/runs/:id/stream", h.StreamRunOutput)
 }
 
 // HealthCheck returns a simple health status.
@@ -472,4 +480,135 @@ func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
+}
+
+// setSSEHeaders sets the required headers for Server-Sent Events.
+func setSSEHeaders(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+}
+
+// StreamRunOutput streams run output as SSE (Server-Sent Events).
+// GET /api/runs/:id/stream
+func (h *Handler) StreamRunOutput(w http.ResponseWriter, r *http.Request) {
+	runID := GetParam(r, "id")
+	if runID == "" {
+		writeError(w, http.StatusBadRequest, "missing run id")
+		return
+	}
+
+	// Try to subscribe to a running stream first — no TOCTOU window.
+	ch, subID, err := h.getBroadcaster().Subscribe(runID)
+	if err != nil {
+		// Run not active — fall back to DB for completed runs.
+		h.streamFinishedRun(w, runID)
+		return
+	}
+	defer h.getBroadcaster().Unsubscribe(runID, subID)
+
+	// Check flusher support BEFORE setting SSE headers.
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "streaming not supported")
+		return
+	}
+
+	setSSEHeaders(w)
+
+	seq := 0
+	hadError := false
+
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			// Client disconnected.
+			return
+		case chunk, ok := <-ch:
+			if !ok {
+				// Channel closed — run finished, send final done event.
+				status := "success"
+				if hadError {
+					status = "error"
+				}
+				doneData, _ := json.Marshal(map[string]string{"status": status})
+				fmt.Fprintf(w, "event: done\ndata: %s\nid: %d\n\n", doneData, seq)
+				flusher.Flush()
+				return
+			}
+
+			// Track whether we received any error chunks.
+			if chunk.Type == "error" {
+				hadError = true
+			}
+
+			// If the broadcaster sent a "done" chunk (from FinishRun), send
+			// our own done event with the accumulated status and return.
+			if chunk.Type == "done" {
+				status := "success"
+				if hadError {
+					status = "error"
+				}
+				doneData, _ := json.Marshal(map[string]string{"status": status})
+				fmt.Fprintf(w, "event: done\ndata: %s\nid: %d\n\n", doneData, seq)
+				flusher.Flush()
+				return
+			}
+
+			// Forward the chunk as an SSE event. JSON-encode the data string
+			// so the client can parse it as a JSON value.
+			dataJSON, _ := json.Marshal(chunk.Data)
+			fmt.Fprintf(w, "event: %s\ndata: %s\nid: %d\n\n", chunk.Type, dataJSON, seq)
+			seq++
+			flusher.Flush()
+
+		case <-ticker.C:
+			// Keep-alive: send an SSE comment to prevent proxy timeouts.
+			fmt.Fprintf(w, ": keep-alive\n\n")
+			flusher.Flush()
+		}
+	}
+}
+
+// streamFinishedRun serves a completed (or failed) run from the database
+// as a single SSE response. Used as a fallback when the run is no longer
+// active in the broadcaster.
+func (h *Handler) streamFinishedRun(w http.ResponseWriter, runID string) {
+	run, err := h.Runs.GetByID(runID)
+	if err != nil {
+		log.Printf("error getting run: %v", err)
+		writeError(w, http.StatusInternalServerError, "failed to get run")
+		return
+	}
+	if run == nil {
+		writeError(w, http.StatusNotFound, "run not found")
+		return
+	}
+
+	// Check flusher support BEFORE setting SSE headers.
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "streaming not supported")
+		return
+	}
+
+	setSSEHeaders(w)
+
+	// Send the full output as a single output event.
+	outputJSON, _ := json.Marshal(run.Output)
+	fmt.Fprintf(w, "event: output\ndata: %s\nid: 0\n\n", outputJSON)
+	flusher.Flush()
+
+	// Send the done event with the run's final status.
+	status := "success"
+	if run.HasError {
+		status = "error"
+	}
+	doneData, _ := json.Marshal(map[string]string{"status": status})
+	fmt.Fprintf(w, "event: done\ndata: %s\nid: 1\n\n", doneData)
+	flusher.Flush()
 }

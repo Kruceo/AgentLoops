@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"agentloops/core/agents"
+	"agentloops/core/runs"
 	"agentloops/core/tasks"
 )
 
@@ -19,6 +20,7 @@ type Scheduler struct {
 	runRepo        *tasks.RunRepository
 	agentMgr       agents.AgentManager
 	workDir        string
+	broadcaster    *runs.RunBroadcaster
 	stopCh         chan struct{}
 	running        bool
 	mu             sync.Mutex
@@ -27,13 +29,19 @@ type Scheduler struct {
 	cleanupCounter int
 }
 
+// GetBroadcaster returns the broadcaster instance used by the scheduler.
+func (s *Scheduler) GetBroadcaster() *runs.RunBroadcaster {
+	return s.broadcaster
+}
+
 // New creates a new Scheduler.
-func New(taskRepo *tasks.TaskRepository, runRepo *tasks.RunRepository, agentMgr agents.AgentManager, workDir string) *Scheduler {
+func New(taskRepo *tasks.TaskRepository, runRepo *tasks.RunRepository, agentMgr agents.AgentManager, workDir string, broadcaster *runs.RunBroadcaster) *Scheduler {
 	return &Scheduler{
 		taskRepo:    taskRepo,
 		runRepo:     runRepo,
 		agentMgr:    agentMgr,
 		workDir:     workDir,
+		broadcaster: broadcaster,
 		stopCh:      make(chan struct{}),
 		lastRun:     make(map[string]time.Time),
 		taskRunning: make(map[string]bool),
@@ -109,8 +117,34 @@ func (s *Scheduler) RunTaskNow(ctx context.Context, task *tasks.Task, runID stri
 	if workDir == "" {
 		workDir = s.workDir
 	}
-	output, err := agent.Run(ctx, workDir, task.InitMessage, task.AgentModel, task.AgentMode)
+
+	// Start the broadcast stream so subscribers can receive chunks in real-time.
+	s.broadcaster.StartRun(runID)
+	defer s.broadcaster.FinishRun(runID)
+
+	// Create a buffered channel for output chunks and start a goroutine
+	// that fans out each chunk to all subscribers. The goroutine exits
+	// when the chunks channel is closed (by RunStreaming after execution).
+	chunks := make(chan agents.OutputChunk, 100)
+
+	var fanoutWg sync.WaitGroup
+	fanoutWg.Add(1)
+	go func() {
+		defer fanoutWg.Done()
+		for chunk := range chunks {
+			s.broadcaster.Emit(runID, "output", chunk.Text)
+		}
+	}()
+
+	output, err := agent.RunStreaming(ctx, workDir, task.InitMessage, task.AgentModel, task.AgentMode, chunks)
+
+	// Wait for the fan-out goroutine to finish emitting all buffered chunks
+	// before FinishRun is called (via defer).
+	fanoutWg.Wait()
+
 	if err != nil {
+		// Emit error chunk so subscribers see the error before the run finishes.
+		s.broadcaster.Emit(runID, "error", err.Error())
 		run.HasError = true
 		run.Output = fmt.Sprintf("error: %v", err)
 		log.Printf("scheduler: task %q failed: %v", task.TaskName, err)

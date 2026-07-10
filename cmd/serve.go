@@ -16,6 +16,7 @@ import (
 	"agentloops/cli/server"
 	"agentloops/core/agents"
 	"agentloops/core/db"
+	"agentloops/core/runs"
 	"agentloops/core/scheduler"
 	"agentloops/core/tasks"
 )
@@ -96,8 +97,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	agentMgr := agents.NewDefaultAgentManager(agentMap)
 
+	// --- Broadcaster (for streaming run output to subscribers) ---
+	broadcaster := runs.NewRunBroadcaster()
+
 	// --- Scheduler ---
-	sched := scheduler.New(taskRepo, runRepo, agentMgr, workDir)
+	sched := scheduler.New(taskRepo, runRepo, agentMgr, workDir, broadcaster)
 
 	// --- API Handler ---
 	handler := &server.Handler{

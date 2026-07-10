@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"unicode"
 )
 
@@ -60,6 +62,101 @@ func (a *OpencodeAgent) Run(ctx context.Context, workDir string, initMessage str
 	output := stdout.String()
 	if stderr.Len() > 0 {
 		output = output + "\n" + stderr.String()
+	}
+
+	return output, nil
+}
+
+// RunStreaming executes the opencode CLI with the given configuration and streams output
+// in real-time via the chunks channel. The channel is closed when execution completes.
+func (a *OpencodeAgent) RunStreaming(ctx context.Context, workDir string, initMessage string, model string, mode string, chunks chan<- OutputChunk) (string, error) {
+	args := []string{"run"}
+
+	if mode != "" {
+		args = append(args, "--agent", mode)
+	}
+
+	if model != "" {
+		args = append(args, "--model", model)
+	}
+
+	args = append(args, "--dangerously-skip-permissions")
+	args = append(args, initMessage)
+
+	cmd := exec.CommandContext(ctx, "opencode", args...)
+	cmd.Dir = workDir
+
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", fmt.Errorf("failed to create stdout pipe: %w", err)
+	}
+
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return "", fmt.Errorf("failed to create stderr pipe: %w", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("failed to start opencode: %w", err)
+	}
+
+	var stdoutBuf, stderrBuf bytes.Buffer
+	var wg sync.WaitGroup
+
+	// Read stdout in a goroutine, line by line
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		scanner := bufio.NewScanner(stdoutPipe)
+		for scanner.Scan() {
+			line := scanner.Text() + "\n"
+			select {
+			case chunks <- OutputChunk{Text: line}:
+			case <-ctx.Done():
+				return
+			}
+			stdoutBuf.WriteString(line)
+			os.Stdout.WriteString(line)
+		}
+	}()
+
+	// Read stderr in a goroutine, line by line
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		scanner := bufio.NewScanner(stderrPipe)
+		for scanner.Scan() {
+			line := scanner.Text() + "\n"
+			select {
+			case chunks <- OutputChunk{Text: line}:
+			case <-ctx.Done():
+				return
+			}
+			stderrBuf.WriteString(line)
+			os.Stdout.WriteString(line)
+		}
+	}()
+
+	// Wait for the command to finish (pipes will close when process exits)
+	err = cmd.Wait()
+
+	// Wait for both goroutines to finish reading
+	wg.Wait()
+
+	// Close the chunks channel to signal completion
+	close(chunks)
+
+	if err != nil {
+		if stderrBuf.Len() > 0 {
+			return "", fmt.Errorf("opencode run failed: %w\nstderr: %s", err, stderrBuf.String())
+		}
+		return "", fmt.Errorf("opencode run failed: %w", err)
+	}
+
+	// Include stderr in the output even without error (matching Run behavior)
+	output := stdoutBuf.String()
+	if stderrBuf.Len() > 0 {
+		output = output + "\n" + stderrBuf.String()
 	}
 
 	return output, nil
