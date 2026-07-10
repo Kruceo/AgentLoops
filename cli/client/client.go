@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,6 +14,15 @@ import (
 )
 
 const maxResponseSize = 10 << 20 // 10 MB
+
+// APIError represents a structured error returned by the API.
+type APIError struct {
+	StatusCode int
+	Code       string
+	Message    string
+}
+
+func (e *APIError) Error() string { return e.Message }
 
 // Client is an HTTP client for the Agent Loop Orchestrator API.
 type Client struct {
@@ -111,13 +119,23 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 	}
 
 	if resp.StatusCode >= 400 {
-		var apiErr map[string]string
-		if err := json.Unmarshal(respBody, &apiErr); err == nil {
-			if msg, ok := apiErr["error"]; ok {
-				return errors.New(msg)
+		var errResp struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		}
+		if jsonErr := json.Unmarshal(respBody, &errResp); jsonErr == nil && errResp.Code != "" {
+			return &APIError{
+				StatusCode: resp.StatusCode,
+				Code:       errResp.Code,
+				Message:    errResp.Message,
 			}
 		}
-		return fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(respBody))
+		// Fallback for non-structured error responses
+		return &APIError{
+			StatusCode: resp.StatusCode,
+			Code:       "UNKNOWN",
+			Message:    fmt.Sprintf("API error (status %d): %s", resp.StatusCode, string(respBody)),
+		}
 	}
 
 	if result != nil && len(respBody) > 0 {
@@ -177,7 +195,7 @@ func (c *Client) getAgentInfo(ctx context.Context, agentID string) (*AgentInfo, 
 			return &a, nil
 		}
 	}
-	return nil, errors.New("agent not found: " + agentID)
+	return nil, &APIError{Code: "AGENT_NOT_FOUND", Message: "agent not found: " + agentID}
 }
 
 // ListTasks returns all tasks.
@@ -191,6 +209,27 @@ func (c *Client) ListTasks(ctx context.Context) ([]Task, error) {
 func (c *Client) CreateTask(ctx context.Context, req CreateTaskRequest) (*Task, error) {
 	var task Task
 	err := c.doRequest(ctx, http.MethodPost, "/api/tasks", req, &task)
+	return &task, err
+}
+
+// UpdateTaskRequest represents the request body for updating a task.
+// Only non-nil fields will be updated.
+type UpdateTaskRequest struct {
+	TaskName        *string `json:"taskName,omitempty"`
+	InitMessage     *string `json:"initMessage,omitempty"`
+	AgentRunner     *string `json:"agentRunner,omitempty"`
+	AgentModel      *string `json:"agentModel,omitempty"`
+	AgentMode       *string `json:"agentMode,omitempty"`
+	WorkDir         *string `json:"workDir,omitempty"`
+	Enabled         *bool   `json:"enabled,omitempty"`
+	CronExpr        *string `json:"cronExpr,omitempty"`
+	IntervalSeconds *int    `json:"intervalSeconds,omitempty"`
+}
+
+// UpdateTask updates an existing task by ID. Only non-nil fields in the request are updated.
+func (c *Client) UpdateTask(ctx context.Context, id string, req UpdateTaskRequest) (*Task, error) {
+	var task Task
+	err := c.doRequest(ctx, http.MethodPut, "/api/tasks/"+url.PathEscape(id), req, &task)
 	return &task, err
 }
 

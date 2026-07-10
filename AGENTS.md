@@ -1,5 +1,5 @@
 # Server
-    - TUI first for CLI CRUD-based operations
+    - TUI first for CLI.
     - Server is a separate command
 
 # Commits/Branches
@@ -35,4 +35,14 @@ That said, it's not CLI-only — we also have an HTTP API, leaving room for anyo
 
 - Must follow [agents.go](core/agents/agent.go)
 - Prefer insecure mode
-- If a task field is not available (e.g. Hermes doesn't have agent modes like opencode's build/plan), assume a single option called "default" that has no practical effect — just to keep the pattern consistent.
+- If a task field is not available (e.g. Hermes doesn't have agent modes like opencode's build/plan), assume a single option called "default" that has no practical effect — just to keep the pattern consistent.   
+
+# The app
+
+The app is split in 2 sides: Client and Server, all in one binary app.
+
+Client always need to use the server to run anything. The server is the core.
+
+# Error Handling
+
+All errors follow the pattern documented in [docs/errors.md](docs/errors.md). Use `core/errors` for error types, `handleError` in API handlers, and `formatError` in TUI.

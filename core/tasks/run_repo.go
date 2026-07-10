@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"agentloops/core/db"
+	apperrors "agentloops/core/errors"
 )
 
 // RunRepository provides CRUD operations for runs backed by SQLite.
@@ -83,7 +84,7 @@ func (r *RunRepository) GetByID(id string) (*Run, error) {
 	run, err := scanRun(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
+			return nil, apperrors.ErrRunNotFound
 		}
 		return nil, fmt.Errorf("get run by id: %w", err)
 	}

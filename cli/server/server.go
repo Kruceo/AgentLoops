@@ -3,6 +3,8 @@ package server
 import (
 	"net/http"
 	"os"
+
+	apperrors "agentloops/core/errors"
 )
 
 // CORS middleware adds CORS headers to all responses and handles preflight requests.
@@ -38,7 +40,7 @@ func AuthMiddleware(token string) func(http.Handler) http.Handler {
 			authHeader := r.Header.Get("Authorization")
 			expected := "Bearer " + token
 			if authHeader != expected {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				handleError(w, apperrors.ErrUnauthorized)
 				return
 			}
 

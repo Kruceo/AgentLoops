@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -14,6 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	"agentloops/core/agents"
+	apperrors "agentloops/core/errors"
 	"agentloops/core/runs"
 	"agentloops/core/scheduler"
 	"agentloops/core/tasks"
@@ -76,7 +76,7 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 	id := GetParam(r, "id")
 	if id == "" {
-		writeError(w, http.StatusBadRequest, "missing agent id")
+		handleError(w, apperrors.Required("agent id"))
 		return
 	}
 
@@ -88,25 +88,25 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeError(w, http.StatusNotFound, "agent not found")
+	handleError(w, apperrors.ErrAgentNotFound)
 }
 
 // GetAgentModels returns available models for a specific agent.
 func (h *Handler) GetAgentModels(w http.ResponseWriter, r *http.Request) {
 	id := GetParam(r, "id")
 	if id == "" {
-		writeError(w, http.StatusBadRequest, "missing agent id")
+		handleError(w, apperrors.Required("agent id"))
 		return
 	}
 
 	agent, err := h.Agents.Get(id)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "agent not found: "+id)
+		handleError(w, &apperrors.AppError{Code: "AGENT_NOT_FOUND", Message: "agent not found: " + id})
 		return
 	}
 	models, err := agent.GetModels()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to get models: "+err.Error())
+		handleError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, models)
@@ -116,18 +116,18 @@ func (h *Handler) GetAgentModels(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetAgentModes(w http.ResponseWriter, r *http.Request) {
 	id := GetParam(r, "id")
 	if id == "" {
-		writeError(w, http.StatusBadRequest, "missing agent id")
+		handleError(w, apperrors.Required("agent id"))
 		return
 	}
 
 	agent, err := h.Agents.Get(id)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "agent not found: "+id)
+		handleError(w, &apperrors.AppError{Code: "AGENT_NOT_FOUND", Message: "agent not found: " + id})
 		return
 	}
 	modes, err := agent.GetModes()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to get modes: "+err.Error())
+		handleError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, modes)
@@ -144,8 +144,7 @@ func (h *Handler) ListTasks(w http.ResponseWriter, r *http.Request) {
 
 	taskList, err := h.Tasks.List(enabledOnly)
 	if err != nil {
-		log.Printf("error listing tasks: %v", err)
-		writeError(w, http.StatusInternalServerError, "failed to list tasks")
+		handleError(w, err)
 		return
 	}
 
@@ -177,24 +176,24 @@ func (h *Handler) CreateTask(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MB limit
 	var req CreateTaskRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		handleError(w, &apperrors.AppError{Code: "VALIDATION", Message: "invalid JSON body", Err: apperrors.ErrValidation})
 		return
 	}
 
 	if req.TaskName == "" {
-		writeError(w, http.StatusBadRequest, "taskName is required")
+		handleError(w, apperrors.Required("taskName"))
 		return
 	}
 	if req.InitMessage == "" {
-		writeError(w, http.StatusBadRequest, "initMessage is required")
+		handleError(w, apperrors.Required("initMessage"))
 		return
 	}
 	if req.AgentRunner == "" {
-		writeError(w, http.StatusBadRequest, "agentRunner is required")
+		handleError(w, apperrors.Required("agentRunner"))
 		return
 	}
 	if _, err := h.Agents.Get(req.AgentRunner); err != nil {
-		writeError(w, http.StatusBadRequest, "unknown agent runner: "+req.AgentRunner)
+		handleError(w, &apperrors.AppError{Code: "VALIDATION", Message: "unknown agent runner: " + req.AgentRunner, Err: apperrors.ErrValidation})
 		return
 	}
 	if req.IntervalSeconds <= 0 {
@@ -222,8 +221,7 @@ func (h *Handler) CreateTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.Tasks.Create(task); err != nil {
-		log.Printf("error creating task: %v", err)
-		writeError(w, http.StatusInternalServerError, "failed to create task")
+		handleError(w, err)
 		return
 	}
 
@@ -234,18 +232,13 @@ func (h *Handler) CreateTask(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetTask(w http.ResponseWriter, r *http.Request) {
 	id := GetParam(r, "id")
 	if id == "" {
-		writeError(w, http.StatusBadRequest, "missing task id")
+		handleError(w, apperrors.Required("task id"))
 		return
 	}
 
 	task, err := h.Tasks.GetByID(id)
 	if err != nil {
-		log.Printf("error getting task: %v", err)
-		writeError(w, http.StatusInternalServerError, "failed to get task")
-		return
-	}
-	if task == nil {
-		writeError(w, http.StatusNotFound, "task not found")
+		handleError(w, err)
 		return
 	}
 
@@ -274,25 +267,20 @@ type UpdateTaskRequest struct {
 func (h *Handler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 	id := GetParam(r, "id")
 	if id == "" {
-		writeError(w, http.StatusBadRequest, "missing task id")
+		handleError(w, apperrors.Required("task id"))
 		return
 	}
 
 	task, err := h.Tasks.GetByID(id)
 	if err != nil {
-		log.Printf("error getting task: %v", err)
-		writeError(w, http.StatusInternalServerError, "failed to get task")
-		return
-	}
-	if task == nil {
-		writeError(w, http.StatusNotFound, "task not found")
+		handleError(w, err)
 		return
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MB limit
 	var req UpdateTaskRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		handleError(w, &apperrors.AppError{Code: "VALIDATION", Message: "invalid JSON body", Err: apperrors.ErrValidation})
 		return
 	}
 
@@ -304,7 +292,7 @@ func (h *Handler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.AgentRunner != nil {
 		if _, err := h.Agents.Get(*req.AgentRunner); err != nil {
-			writeError(w, http.StatusBadRequest, "unknown agent runner: "+*req.AgentRunner)
+			handleError(w, &apperrors.AppError{Code: "VALIDATION", Message: "unknown agent runner: " + *req.AgentRunner, Err: apperrors.ErrValidation})
 			return
 		}
 		task.AgentRunner = *req.AgentRunner
@@ -329,8 +317,7 @@ func (h *Handler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.Tasks.Update(task); err != nil {
-		log.Printf("error updating task: %v", err)
-		writeError(w, http.StatusInternalServerError, "failed to update task")
+		handleError(w, err)
 		return
 	}
 
@@ -341,17 +328,12 @@ func (h *Handler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 	id := GetParam(r, "id")
 	if id == "" {
-		writeError(w, http.StatusBadRequest, "missing task id")
+		handleError(w, apperrors.Required("task id"))
 		return
 	}
 
 	if err := h.Tasks.Delete(id); err != nil {
-		if errors.Is(err, tasks.ErrTaskNotFound) {
-			writeError(w, http.StatusNotFound, "task not found")
-			return
-		}
-		log.Printf("error deleting task: %v", err)
-		writeError(w, http.StatusInternalServerError, "failed to delete task")
+		handleError(w, err)
 		return
 	}
 
@@ -364,7 +346,7 @@ func (h *Handler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ListTaskRuns(w http.ResponseWriter, r *http.Request) {
 	taskID := GetParam(r, "id")
 	if taskID == "" {
-		writeError(w, http.StatusBadRequest, "missing task id")
+		handleError(w, apperrors.Required("task id"))
 		return
 	}
 
@@ -377,8 +359,7 @@ func (h *Handler) ListTaskRuns(w http.ResponseWriter, r *http.Request) {
 
 	runList, err := h.Runs.ListByTaskID(taskID, limit)
 	if err != nil {
-		log.Printf("error listing runs: %v", err)
-		writeError(w, http.StatusInternalServerError, "failed to list runs")
+		handleError(w, err)
 		return
 	}
 
@@ -389,23 +370,18 @@ func (h *Handler) ListTaskRuns(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) RunTaskNow(w http.ResponseWriter, r *http.Request) {
 	id := GetParam(r, "id")
 	if id == "" {
-		writeError(w, http.StatusBadRequest, "missing task id")
+		handleError(w, apperrors.Required("task id"))
 		return
 	}
 
 	task, err := h.Tasks.GetByID(id)
 	if err != nil {
-		log.Printf("error getting task: %v", err)
-		writeError(w, http.StatusInternalServerError, "failed to get task")
-		return
-	}
-	if task == nil {
-		writeError(w, http.StatusNotFound, "task not found")
+		handleError(w, err)
 		return
 	}
 
 	if h.Scheduler.IsTaskRunning(id) {
-		writeError(w, http.StatusConflict, "task is already running")
+		handleError(w, &apperrors.AppError{Code: "CONFLICT", Message: "task is already running"})
 		return
 	}
 
@@ -438,8 +414,7 @@ func (h *Handler) ListRuns(w http.ResponseWriter, r *http.Request) {
 
 	runList, err := h.Runs.ListAll(limit)
 	if err != nil {
-		log.Printf("error listing all runs: %v", err)
-		writeError(w, http.StatusInternalServerError, "failed to list runs")
+		handleError(w, err)
 		return
 	}
 
@@ -450,18 +425,13 @@ func (h *Handler) ListRuns(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetRun(w http.ResponseWriter, r *http.Request) {
 	id := GetParam(r, "id")
 	if id == "" {
-		writeError(w, http.StatusBadRequest, "missing run id")
+		handleError(w, apperrors.Required("run id"))
 		return
 	}
 
 	run, err := h.Runs.GetByID(id)
 	if err != nil {
-		log.Printf("error getting run: %v", err)
-		writeError(w, http.StatusInternalServerError, "failed to get run")
-		return
-	}
-	if run == nil {
-		writeError(w, http.StatusNotFound, "run not found")
+		handleError(w, err)
 		return
 	}
 
@@ -478,8 +448,18 @@ func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	}
 }
 
-func writeError(w http.ResponseWriter, status int, message string) {
-	writeJSON(w, status, map[string]string{"error": message})
+func handleError(w http.ResponseWriter, err error) {
+	var appErr *apperrors.AppError
+	if apperrors.As(err, &appErr) {
+		status := apperrors.StatusFor(err)
+		writeJSON(w, status, appErr)
+		return
+	}
+	log.Printf("unexpected error: %v", err)
+	writeJSON(w, http.StatusInternalServerError, &apperrors.AppError{
+		Code:    "INTERNAL",
+		Message: "internal server error",
+	})
 }
 
 // setSSEHeaders sets the required headers for Server-Sent Events.
@@ -495,7 +475,7 @@ func setSSEHeaders(w http.ResponseWriter) {
 func (h *Handler) StreamRunOutput(w http.ResponseWriter, r *http.Request) {
 	runID := GetParam(r, "id")
 	if runID == "" {
-		writeError(w, http.StatusBadRequest, "missing run id")
+		handleError(w, apperrors.Required("run id"))
 		return
 	}
 
@@ -511,7 +491,7 @@ func (h *Handler) StreamRunOutput(w http.ResponseWriter, r *http.Request) {
 	// Check flusher support BEFORE setting SSE headers.
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		writeError(w, http.StatusInternalServerError, "streaming not supported")
+		handleError(w, &apperrors.AppError{Code: "INTERNAL", Message: "streaming not supported"})
 		return
 	}
 
@@ -586,19 +566,14 @@ func (h *Handler) StreamRunOutput(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) streamFinishedRun(w http.ResponseWriter, runID string) {
 	run, err := h.Runs.GetByID(runID)
 	if err != nil {
-		log.Printf("error getting run: %v", err)
-		writeError(w, http.StatusInternalServerError, "failed to get run")
-		return
-	}
-	if run == nil {
-		writeError(w, http.StatusNotFound, "run not found")
+		handleError(w, err)
 		return
 	}
 
 	// Check flusher support BEFORE setting SSE headers.
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		writeError(w, http.StatusInternalServerError, "streaming not supported")
+		handleError(w, &apperrors.AppError{Code: "INTERNAL", Message: "streaming not supported"})
 		return
 	}
 

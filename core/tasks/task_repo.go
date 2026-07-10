@@ -7,10 +7,8 @@ import (
 	"time"
 
 	"agentloops/core/db"
+	apperrors "agentloops/core/errors"
 )
-
-// ErrTaskNotFound is returned when a task is not found in the repository.
-var ErrTaskNotFound = errors.New("task not found")
 
 // TaskRepository provides CRUD operations for tasks backed by SQLite.
 type TaskRepository struct {
@@ -60,8 +58,8 @@ func (r *TaskRepository) GetByID(id string) (*Task, error) {
 	row := r.db.QueryRow(query, id)
 	task, err := scanTask(row)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, apperrors.ErrTaskNotFound
 		}
 		return nil, fmt.Errorf("get task by id: %w", err)
 	}
@@ -130,7 +128,7 @@ func (r *TaskRepository) Update(task *Task) error {
 		return fmt.Errorf("update task rows affected: %w", err)
 	}
 	if rows == 0 {
-		return fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
+		return fmt.Errorf("%w: %s", apperrors.ErrTaskNotFound, task.ID)
 	}
 
 	return nil
@@ -154,7 +152,7 @@ func (r *TaskRepository) Delete(id string) error {
 		return fmt.Errorf("delete task rows affected: %w", err)
 	}
 	if rows == 0 {
-		return fmt.Errorf("%w: %s", ErrTaskNotFound, id)
+		return fmt.Errorf("%w: %s", apperrors.ErrTaskNotFound, id)
 	}
 
 	return nil

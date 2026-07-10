@@ -23,6 +23,10 @@ type TaskStartModel struct {
 	taskList list.Model
 	client   *client.Client
 
+	// Customizable titles for reuse across different task selection flows.
+	listTitle   string
+	headerTitle string
+
 	// Set when the user selects a task.
 	SelectedTaskID string
 	quitting       bool
@@ -53,20 +57,28 @@ func (i taskListItem) FilterValue() string {
 	return i.task.TaskName + " " + i.task.ID
 }
 
-// NewTaskStartModel creates a new TUI model for selecting a task.
-func NewTaskStartModel(serverURL string) TaskStartModel {
+// NewTaskSelectModel creates a generic task selection TUI model with
+// customizable list title and header prompt.
+func NewTaskSelectModel(serverURL string, listTitle string, headerTitle string) TaskStartModel {
 	taskList := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
-	taskList.Title = "Select a Task to Start"
+	taskList.Title = listTitle
 	taskList.SetShowHelp(false)
 	taskList.SetShowTitle(true)
 	taskList.SetFilteringEnabled(true)
 	taskList.SetShowStatusBar(false)
 
 	return TaskStartModel{
-		step:     0,
-		taskList: taskList,
-		client:   client.NewClient(serverURL),
+		step:        0,
+		taskList:    taskList,
+		client:      client.NewClient(serverURL),
+		listTitle:   listTitle,
+		headerTitle: headerTitle,
 	}
+}
+
+// NewTaskStartModel creates a new TUI model for selecting a task to start.
+func NewTaskStartModel(serverURL string) TaskStartModel {
+	return NewTaskSelectModel(serverURL, "Select a Task to Start", "➜ Start Task")
 }
 
 // --- Messages ---
@@ -149,11 +161,11 @@ func (m TaskStartModel) View() tea.View {
 	var b strings.Builder
 
 	b.WriteString("\n")
-	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6")).Render("  ➜ Start Task"))
+	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6")).Render("  " + m.headerTitle))
 	b.WriteString("\n\n")
 
 	if m.err != nil {
-		b.WriteString(errorStyle.Render("  ✗ Failed to load tasks: " + m.err.Error()))
+		b.WriteString(formatError(m.err))
 		b.WriteString("\n\n")
 		b.WriteString(hintStyle.Render("  Press Ctrl+C to quit"))
 		b.WriteString("\n")
@@ -175,10 +187,9 @@ func (m TaskStartModel) View() tea.View {
 	return v
 }
 
-// RunStartTaskTUI launches the interactive task-selection TUI.
-// Returns the selected task ID, or an empty string if the user cancelled.
-func RunStartTaskTUI(serverURL string) (string, error) {
-	m := NewTaskStartModel(serverURL)
+// runTaskSelectProgram is a shared helper that creates and runs a Bubble Tea
+// program for task selection using the given model, returning the selected task ID.
+func runTaskSelectProgram(m TaskStartModel) (string, error) {
 	program := tea.NewProgram(m)
 
 	finalModel, runErr := program.Run()
@@ -191,4 +202,18 @@ func RunStartTaskTUI(serverURL string) (string, error) {
 		return "", fm.err
 	}
 	return fm.SelectedTaskID, nil
+}
+
+// RunTaskSelectTUI launches the interactive task-selection TUI with a
+// custom list title and header prompt. Returns the selected task ID,
+// or an empty string if the user cancelled.
+func RunTaskSelectTUI(serverURL string, listTitle string, headerTitle string) (string, error) {
+	m := NewTaskSelectModel(serverURL, listTitle, headerTitle)
+	return runTaskSelectProgram(m)
+}
+
+// RunStartTaskTUI launches the interactive task-selection TUI for starting a task.
+// Returns the selected task ID, or an empty string if the user cancelled.
+func RunStartTaskTUI(serverURL string) (string, error) {
+	return RunTaskSelectTUI(serverURL, "Select a Task to Start", "➜ Start Task")
 }
