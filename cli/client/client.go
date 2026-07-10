@@ -281,6 +281,7 @@ func (c *Client) StreamRunOutput(ctx context.Context, runID string) (<-chan Stre
 
 		scanner := bufio.NewScanner(resp.Body)
 		var currentType, currentData string
+		receivedDone := false
 
 		for scanner.Scan() {
 			line := scanner.Text()
@@ -295,6 +296,7 @@ func (c *Client) StreamRunOutput(ctx context.Context, runID string) (<-chan Stre
 				if currentType != "" || currentData != "" {
 					ch <- StreamEvent{Type: currentType, Data: currentData}
 					if currentType == "done" {
+						receivedDone = true
 						return
 					}
 					currentType = ""
@@ -310,6 +312,28 @@ func (c *Client) StreamRunOutput(ctx context.Context, runID string) (<-chan Stre
 			ch <- StreamEvent{
 				Type: "error",
 				Data: fmt.Sprintf("stream read error: %v", err),
+			}
+			return
+		}
+
+		// If the stream ended without a "done" event (e.g., network glitch or
+		// context cancellation), fall back to querying the REST API for the
+		// run's final status. This makes the client resilient to stream
+		// interruptions.
+		if !receivedDone && ctx.Err() == nil {
+			run, err := c.GetRun(ctx, runID)
+			if err == nil && run != nil {
+				status := "success"
+				if run.HasError {
+					status = "error"
+				}
+				ch <- StreamEvent{Type: "done", Data: fmt.Sprintf(`{"status":"%s"}`, status)}
+				return
+			}
+			// API fallback also failed — report the error.
+			ch <- StreamEvent{
+				Type: "error",
+				Data: fmt.Sprintf("stream ended unexpectedly and API fallback failed: %v", err),
 			}
 		}
 	}()

@@ -519,6 +519,24 @@ func (h *Handler) StreamRunOutput(w http.ResponseWriter, r *http.Request) {
 
 	seq := 0
 	hadError := false
+	doneSent := false
+
+	// Ensure we always send a done event before the handler returns,
+	// even if the context is cancelled mid-stream.
+	sendDone := func() {
+		if doneSent {
+			return
+		}
+		doneSent = true
+		status := "success"
+		if hadError {
+			status = "error"
+		}
+		doneData, _ := json.Marshal(map[string]string{"status": status})
+		fmt.Fprintf(w, "event: done\ndata: %s\nid: %d\n\n", doneData, seq)
+		flusher.Flush()
+	}
+	defer sendDone()
 
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
@@ -526,18 +544,12 @@ func (h *Handler) StreamRunOutput(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-r.Context().Done():
-			// Client disconnected.
+			// Client disconnected — send done before returning (defer handles it).
 			return
 		case chunk, ok := <-ch:
 			if !ok {
-				// Channel closed — run finished, send final done event.
-				status := "success"
-				if hadError {
-					status = "error"
-				}
-				doneData, _ := json.Marshal(map[string]string{"status": status})
-				fmt.Fprintf(w, "event: done\ndata: %s\nid: %d\n\n", doneData, seq)
-				flusher.Flush()
+				// Channel closed — run finished. sendDone (via defer) will
+				// emit the final done event.
 				return
 			}
 
@@ -549,13 +561,7 @@ func (h *Handler) StreamRunOutput(w http.ResponseWriter, r *http.Request) {
 			// If the broadcaster sent a "done" chunk (from FinishRun), send
 			// our own done event with the accumulated status and return.
 			if chunk.Type == "done" {
-				status := "success"
-				if hadError {
-					status = "error"
-				}
-				doneData, _ := json.Marshal(map[string]string{"status": status})
-				fmt.Fprintf(w, "event: done\ndata: %s\nid: %d\n\n", doneData, seq)
-				flusher.Flush()
+				sendDone()
 				return
 			}
 
