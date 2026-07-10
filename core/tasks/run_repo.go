@@ -2,6 +2,7 @@ package tasks
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -81,7 +82,7 @@ func (r *RunRepository) GetByID(id string) (*Run, error) {
 	row := r.db.QueryRow(query, id)
 	run, err := scanRun(row)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("get run by id: %w", err)

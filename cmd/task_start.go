@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -58,44 +59,54 @@ func runTaskStart(command *cobra.Command, args []string) error {
 	runID := resp.ID
 	printInfo(fmt.Sprintf("Run %s started, waiting for completion...", runID))
 
-	// Poll GET /api/runs/:id until finished.
-	// The run record may not exist yet since RunTaskNow is async —
-	// the goroutine creates the record after the agent finishes.
-	pollCtx, cancel := context.WithTimeout(ctx, 20*time.Minute)
+	// Stream run output via SSE with a 20-minute timeout.
+	streamCtx, cancel := context.WithTimeout(ctx, 20*time.Minute)
 	defer cancel()
 
-	for {
-		run, err := c.GetRun(pollCtx, runID)
-		if err != nil || run == nil {
-			// Run not created yet or not found — keep polling.
-			select {
-			case <-pollCtx.Done():
-				return fmt.Errorf("timed out waiting for task to complete (run: %s)", runID)
-			case <-time.After(1 * time.Second):
-				continue
-			}
-		}
+	events, err := c.StreamRunOutput(streamCtx, runID)
+	if err != nil {
+		return fmt.Errorf("failed to stream run output: %w", err)
+	}
 
-		if run.FinishedAt != nil {
-			// Run completed
-			if run.Output != "" {
-				fmt.Println(run.Output)
+	for evt := range events {
+		switch evt.Type {
+		case "output":
+			var text string
+			if err := json.Unmarshal([]byte(evt.Data), &text); err != nil {
+				fmt.Print(evt.Data)
+			} else {
+				fmt.Print(text)
 			}
 
-			if run.HasError {
-				printError(fmt.Sprintf("Task failed (run: %s)", runID))
-				return fmt.Errorf("task failed")
+		case "error":
+			var text string
+			if err := json.Unmarshal([]byte(evt.Data), &text); err != nil {
+				printError(evt.Data)
+			} else {
+				printError(text)
 			}
 
-			printSuccess(fmt.Sprintf("Task completed successfully (run: %s)", runID))
-			return nil
-		}
+		case "done":
+			var doneData struct {
+				Status string `json:"status"`
+			}
+			if err := json.Unmarshal([]byte(evt.Data), &doneData); err != nil {
+				return fmt.Errorf("failed to parse done event: %w", err)
+			}
 
-		select {
-		case <-pollCtx.Done():
-			return fmt.Errorf("timed out waiting for task to complete (run: %s)", runID)
-		case <-time.After(1 * time.Second):
-			// Continue polling
+			if doneData.Status == "success" {
+				printSuccess(fmt.Sprintf("Task completed successfully (run: %s)", runID))
+				return nil
+			}
+
+			printError(fmt.Sprintf("Task failed (run: %s)", runID))
+			return fmt.Errorf("task failed")
 		}
 	}
+
+	// If the channel closed without receiving a "done" event, check why.
+	if streamCtx.Err() != nil {
+		return fmt.Errorf("timed out waiting for task to complete (run: %s)", runID)
+	}
+	return fmt.Errorf("stream ended unexpectedly (run: %s)", runID)
 }

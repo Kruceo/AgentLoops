@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -9,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -246,4 +248,71 @@ func (c *Client) GetRun(ctx context.Context, runID string) (*Run, error) {
 		return nil, err
 	}
 	return &run, nil
+}
+
+// StreamEvent represents an SSE event from the runs stream endpoint.
+type StreamEvent struct {
+	Type string // "output", "error", or "done"
+	Data string // The raw data payload (JSON-encoded string for "output"/"error", JSON object for "done")
+}
+
+// StreamRunOutput connects to the SSE stream for a run and returns a channel of events.
+// The channel is closed when the stream ends (after receiving "done" or on error).
+// The caller should drain the channel to avoid blocking.
+func (c *Client) StreamRunOutput(ctx context.Context, runID string) (<-chan StreamEvent, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/runs/"+url.PathEscape(runID)+"/stream", nil)
+	if err != nil {
+		return nil, fmt.Errorf("create stream request: %w", err)
+	}
+	req.Header.Set("Accept", "text/event-stream")
+
+	// Use a separate HTTP client with no timeout for SSE (long-lived connection)
+	sseClient := &http.Client{}
+	resp, err := sseClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("do stream request: %w", err)
+	}
+
+	ch := make(chan StreamEvent)
+
+	go func() {
+		defer close(ch)
+		defer resp.Body.Close()
+
+		scanner := bufio.NewScanner(resp.Body)
+		var currentType, currentData string
+
+		for scanner.Scan() {
+			line := scanner.Text()
+
+			switch {
+			case strings.HasPrefix(line, "event: "):
+				currentType = strings.TrimPrefix(line, "event: ")
+			case strings.HasPrefix(line, "data: "):
+				currentData = strings.TrimPrefix(line, "data: ")
+			case line == "":
+				// Empty line dispatches the accumulated event
+				if currentType != "" || currentData != "" {
+					ch <- StreamEvent{Type: currentType, Data: currentData}
+					if currentType == "done" {
+						return
+					}
+					currentType = ""
+					currentData = ""
+				}
+			}
+			// Lines starting with ":" (comments/keep-alive) and "id: " are silently skipped
+		}
+
+		// If the scanner stopped due to a real error (not context cancellation),
+		// send an error event before closing the channel.
+		if err := scanner.Err(); err != nil && ctx.Err() == nil {
+			ch <- StreamEvent{
+				Type: "error",
+				Data: fmt.Sprintf("stream read error: %v", err),
+			}
+		}
+	}()
+
+	return ch, nil
 }
