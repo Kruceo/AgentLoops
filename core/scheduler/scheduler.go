@@ -124,7 +124,7 @@ func (s *Scheduler) RunTaskNow(ctx context.Context, task *tasks.Task, runID stri
 
 	// Create a buffered channel for output chunks and start a goroutine
 	// that fans out each chunk to all subscribers. The goroutine exits
-	// when the chunks channel is closed (by RunStreaming after execution).
+	// when the chunks channel is closed (by Run after execution).
 	chunks := make(chan agents.OutputChunk, 100)
 
 	var fanoutWg sync.WaitGroup
@@ -136,7 +136,7 @@ func (s *Scheduler) RunTaskNow(ctx context.Context, task *tasks.Task, runID stri
 		}
 	}()
 
-	output, err := agent.RunStreaming(ctx, workDir, task.InitMessage, task.AgentModel, task.AgentMode, chunks)
+	output, err := agent.Run(ctx, workDir, task.InitMessage, task.AgentModel, task.AgentMode, chunks)
 
 	// Wait for the fan-out goroutine to finish emitting all buffered chunks
 	// before FinishRun is called (via defer).

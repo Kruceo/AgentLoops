@@ -26,50 +26,9 @@ func (a *OpencodeAgent) Name() string {
 	return "opencode"
 }
 
-// Run executes the opencode CLI with the given configuration.
-func (a *OpencodeAgent) Run(ctx context.Context, workDir string, initMessage string, model string, mode string) (string, error) {
-	args := []string{"run"}
-
-	if mode != "" {
-		args = append(args, "--agent", mode)
-	}
-
-	if model != "" {
-		args = append(args, "--model", model)
-	}
-
-	args = append(args, "--dangerously-skip-permissions")
-
-	args = append(args, initMessage)
-
-	cmd := exec.CommandContext(ctx, "opencode", args...)
-	cmd.Dir = workDir
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = io.MultiWriter(&stdout, os.Stdout)
-	cmd.Stderr = io.MultiWriter(&stderr, os.Stdout)
-
-	err := cmd.Run()
-	if err != nil {
-		// Include stderr in the error for debugging
-		if stderr.Len() > 0 {
-			return "", fmt.Errorf("opencode run failed: %w\nstderr: %s", err, stderr.String())
-		}
-		return "", fmt.Errorf("opencode run failed: %w", err)
-	}
-
-	// If stderr has content but no error, still include it
-	output := stdout.String()
-	if stderr.Len() > 0 {
-		output = output + "\n" + stderr.String()
-	}
-
-	return output, nil
-}
-
-// RunStreaming executes the opencode CLI with the given configuration and streams output
+// Run executes the opencode CLI with the given configuration and streams output
 // in real-time via the chunks channel. The channel is closed when execution completes.
-func (a *OpencodeAgent) RunStreaming(ctx context.Context, workDir string, initMessage string, model string, mode string, chunks chan<- OutputChunk) (string, error) {
+func (a *OpencodeAgent) Run(ctx context.Context, workDir string, initMessage string, model string, mode string, chunks chan<- OutputChunk) (string, error) {
 	args := []string{"run"}
 
 	if mode != "" {

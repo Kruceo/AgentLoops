@@ -12,15 +12,12 @@ type Agent interface {
 	// Name returns the unique identifier for this agent type.
 	Name() string
 
-	// Run executes the agent with the given configuration and returns the output.
-	Run(ctx context.Context, workDir string, initMessage string, model string, mode string) (string, error)
-
-	// RunStreaming executes the agent and emits output chunks in real-time via the provided channel.
+	// Run executes the agent and emits output chunks in real-time via the provided channel.
 	// The channel is closed when execution completes (whether success or error).
 	// If an error occurs, the last chunk sent before closing contains the error message,
 	// and the method returns that error.
 	// The caller is responsible for consuming all chunks from the channel.
-	RunStreaming(ctx context.Context, workDir string, initMessage string, model string, mode string, chunks chan<- OutputChunk) (string, error)
+	Run(ctx context.Context, workDir string, initMessage string, model string, mode string, chunks chan<- OutputChunk) (string, error)
 
 	// GetModels returns a list of available models for this agent.
 	GetModels() ([]string, error)
