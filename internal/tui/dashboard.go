@@ -11,7 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"agentloops/cli/client"
+	"agentloops/internal/client"
 )
 
 // DashboardAction represents what the dashboard wants to do after quitting.

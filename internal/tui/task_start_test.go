@@ -3,7 +3,7 @@ package tui
 import (
 	"testing"
 
-	"agentloops/cli/client"
+	"agentloops/internal/client"
 )
 
 func TestTaskStart_NewModel(t *testing.T) {

@@ -3,7 +3,7 @@ package cmd
 import (
 	"github.com/spf13/cobra"
 
-	"agentloops/cli/tui"
+	"agentloops/internal/tui"
 )
 
 // taskEditCmd represents the task edit command

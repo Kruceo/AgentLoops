@@ -8,8 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"agentloops/cli/client"
-	"agentloops/cli/tui"
+	"agentloops/internal/client"
+	"agentloops/internal/tui"
 )
 
 // taskStartCmd represents the task start command

@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"agentloops/cli/client"
-	"agentloops/cli/tui"
+	"agentloops/internal/client"
+	"agentloops/internal/tui"
 )
 
 // taskDisableCmd represents the task disable command

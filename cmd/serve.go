@@ -13,7 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"agentloops/cli/server"
+	"agentloops/internal/server"
 	"agentloops/core/agents"
 	"agentloops/core/db"
 	"agentloops/core/runs"

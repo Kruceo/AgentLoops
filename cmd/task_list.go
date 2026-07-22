@@ -9,7 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/spf13/cobra"
 
-	"agentloops/cli/client"
+	"agentloops/internal/client"
 )
 
 // taskListCmd represents the task list command

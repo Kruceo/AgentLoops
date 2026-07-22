@@ -10,7 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"agentloops/cli/client"
+	"agentloops/internal/client"
 )
 
 // taskRemoveCmd represents the task remove command

@@ -57,7 +57,7 @@ func (r *TaskRepository) GetByID(id string) (*Task, error) {
 }
 ```
 
-## API: `cli/server`
+## API: `internal/server`
 
 ### Response Format
 
@@ -89,7 +89,7 @@ handleError(w, err) // logs internally, returns 500 INTERNAL
 
 Uses the same `handleError` for JSON error responses (not `http.Error` plain text).
 
-## Client: `cli/client`
+## Client: `internal/client`
 
 ### APIError
 
@@ -111,7 +111,7 @@ if errors.As(err, &apiErr) {
 }
 ```
 
-## TUI: `cli/tui`
+## TUI: `internal/tui`
 
 ### Visual Differentiation
 

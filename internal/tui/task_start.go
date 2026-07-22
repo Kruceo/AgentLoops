@@ -9,7 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"agentloops/cli/client"
+	"agentloops/internal/client"
 )
 
 // TaskStartModel is the Bubble Tea model for the task selection TUI.

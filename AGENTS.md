@@ -18,8 +18,9 @@ If committing directly to main or dev (hotfixes or similar), use the "fix:" or "
 
 **Commit messages must always be in English** (title and body), regardless of the code or conversation language.
 
-**Never** add plans (typically md files) to commits.
-**Never** commit compiled binaries.
+- **Never** add plans (typically md files) to commits.
+- **Never** commit compiled binaries.
+- **Never** commit test shell scripts.
 
 # Purpose
 

@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"agentloops/cli/tui"
+	"agentloops/internal/tui"
 )
 
 // taskAddCmd represents the task add command

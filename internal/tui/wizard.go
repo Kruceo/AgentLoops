@@ -2,8 +2,10 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,22 +17,67 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"agentloops/cli/client"
+	"agentloops/internal/client"
 )
 
-// message types for the edit wizard
-type taskFetchedMsg struct {
-	task *client.Task
-	err  error
+var (
+	stepTitleStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("6")).
+			MarginBottom(1)
+
+	stepDescStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("241")).
+			MarginBottom(1)
+
+	hintStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("241")).
+			Italic(true)
+
+	errorStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("9"))
+
+	warnStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("11"))
+
+	successStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("10"))
+
+	confirmKeyStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("6"))
+
+	confirmValStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("7"))
+)
+
+// Step identifiers
+const (
+	stepTaskName int = iota
+	stepInitMessage
+	stepAgent
+	stepModel
+	stepMode
+	stepWorkDir
+	stepInterval
+	stepConfirm
+	stepDone
+)
+
+// stepNames maps step indices to human-readable names.
+var stepNames = map[int]string{
+	stepTaskName:    "Task Name",
+	stepInitMessage: "Init Message",
+	stepAgent:       "Agent",
+	stepModel:       "Model",
+	stepMode:        "Mode",
+	stepWorkDir:     "Working Directory",
+	stepInterval:    "Interval",
+	stepConfirm:     "Confirm",
 }
 
-type taskUpdatedMsg struct {
-	task *client.Task
-	err  error
-}
-
-// EditWizardModel is the Bubble Tea model for the task edit wizard.
-type EditWizardModel struct {
+// WizardModel is the Bubble Tea model for the task creation wizard.
+type WizardModel struct {
 	// State
 	currentStep int
 	width       int
@@ -39,25 +86,21 @@ type EditWizardModel struct {
 	Quitting    bool
 	Submitted   bool
 
-	// Task being edited
-	taskID   string
-	original *client.Task // original values for change detection
-
-	// Inputs (pre-filled with current values)
+	// Inputs
 	taskNameInput    textinput.Model
 	initMessageInput textarea.Model
 	filePicker       filepicker.Model
 	intervalInput    textinput.Model
 
-	// Dynamic selects
+	// Dynamic selects (built from list.Model)
 	agentList list.Model
 	modelList list.Model
 	modeList  list.Model
 
-	// Parsed interval
+	// Parsed interval in seconds (from natural language input)
 	intervalSeconds int
 
-	// Selections (pre-filled)
+	// Selections
 	selectedAgent string
 	selectedModel string
 	selectedMode  string
@@ -71,8 +114,6 @@ type EditWizardModel struct {
 	spinner      spinner.Model
 	loading      bool
 	loadingMsg   string
-	agentsLoaded bool
-	taskLoaded   bool
 	modelsLoaded bool
 	modesLoaded  bool
 
@@ -80,11 +121,11 @@ type EditWizardModel struct {
 	client *client.Client
 
 	// Result
-	UpdatedTask *client.Task
+	CreatedTask *client.Task
 }
 
-// NewEditWizardModel creates a new edit wizard model.
-func NewEditWizardModel(taskID, serverURL string) EditWizardModel {
+// NewWizardModel creates a new wizard model.
+func NewWizardModel(serverURL string) WizardModel {
 	// Task Name input
 	taskName := textinput.New()
 	taskName.Placeholder = "e.g., daily-code-review"
@@ -97,7 +138,11 @@ func NewEditWizardModel(taskID, serverURL string) EditWizardModel {
 	initMsg.Placeholder = "Enter the message to send to the agent..."
 	initMsg.Focus()
 	initMsg.SetWidth(60)
+	// initMsg.Prompt = "│ "
 	initMsg.SetHeight(5)
+	// initMsg.DynamicHeight = true
+	// initMsg.MaxHeight = 10
+	// initMsg.ShowLineNumbers = false
 
 	// File picker for working directory
 	fp := filepicker.New()
@@ -148,9 +193,8 @@ func NewEditWizardModel(taskID, serverURL string) EditWizardModel {
 	modeList.SetFilteringEnabled(false)
 	modeList.SetShowStatusBar(false)
 
-	return EditWizardModel{
+	return WizardModel{
 		currentStep:      stepTaskName,
-		taskID:           taskID,
 		taskNameInput:    taskName,
 		initMessageInput: initMsg,
 		filePicker:       fp,
@@ -163,20 +207,72 @@ func NewEditWizardModel(taskID, serverURL string) EditWizardModel {
 	}
 }
 
+// agentListItem wraps an AgentInfo for use in list.Model.
+type agentListItem struct {
+	info client.AgentInfo
+}
+
+func (i agentListItem) Title() string {
+	status := "✓"
+	if !i.info.Installed {
+		status = "✗"
+	}
+	return fmt.Sprintf("%s %s (%s)", status, i.info.Name, i.info.ID)
+}
+
+func (i agentListItem) Description() string {
+	if !i.info.Installed {
+		return "NOT INSTALLED"
+	}
+	return ""
+}
+
+func (i agentListItem) FilterValue() string {
+	return i.info.ID + " " + i.info.Name
+}
+
+// stringListItem wraps a string for use in list.Model.
+type stringListItem struct {
+	value string
+}
+
+func (i stringListItem) Title() string       { return i.value }
+func (i stringListItem) Description() string { return "" }
+func (i stringListItem) FilterValue() string { return i.value }
+
+// --- Bubble Tea messages ---
+
+type agentsLoadedMsg struct {
+	agents []client.AgentInfo
+	err    error
+}
+
+type modelsLoadedMsg struct {
+	models []string
+	err    error
+}
+
+type modesLoadedMsg struct {
+	modes []string
+	err   error
+}
+
+type taskCreatedMsg struct {
+	task *client.Task
+	err  error
+}
+
 // --- Init ---
 
-func (m EditWizardModel) Init() tea.Cmd {
-	m.loading = true
-	m.loadingMsg = "Loading task data..."
+func (m WizardModel) Init() tea.Cmd {
 	return tea.Batch(
 		m.spinner.Tick,
 		m.fetchAgents(),
-		m.fetchTask(),
 		m.filePicker.Init(),
 	)
 }
 
-func (m EditWizardModel) fetchAgents() tea.Cmd {
+func (m WizardModel) fetchAgents() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
@@ -185,16 +281,7 @@ func (m EditWizardModel) fetchAgents() tea.Cmd {
 	}
 }
 
-func (m EditWizardModel) fetchTask() tea.Cmd {
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		task, err := m.client.GetTask(ctx, m.taskID)
-		return taskFetchedMsg{task: task, err: err}
-	}
-}
-
-func (m EditWizardModel) fetchModels(agentID string) tea.Cmd {
+func (m WizardModel) fetchModels(agentID string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
@@ -203,7 +290,7 @@ func (m EditWizardModel) fetchModels(agentID string) tea.Cmd {
 	}
 }
 
-func (m EditWizardModel) fetchModes(agentID string) tea.Cmd {
+func (m WizardModel) fetchModes(agentID string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
@@ -212,83 +299,28 @@ func (m EditWizardModel) fetchModes(agentID string) tea.Cmd {
 	}
 }
 
-func (m EditWizardModel) updateTask() tea.Cmd {
+func (m WizardModel) createTask() tea.Cmd {
 	return func() tea.Msg {
-		var req client.UpdateTaskRequest
-
-		// Only set non-nil fields for values that changed
-		if m.taskNameInput.Value() != m.original.TaskName {
-			v := m.taskNameInput.Value()
-			req.TaskName = &v
-		}
-		if m.initMessageInput.Value() != m.original.InitMessage {
-			v := m.initMessageInput.Value()
-			req.InitMessage = &v
-		}
-		if m.selectedAgent != m.original.AgentRunner {
-			v := m.selectedAgent
-			req.AgentRunner = &v
-		}
-		if m.selectedModel != m.original.AgentModel {
-			v := m.selectedModel
-			req.AgentModel = &v
-		}
-		if m.selectedMode != m.original.AgentMode {
-			v := m.selectedMode
-			req.AgentMode = &v
-		}
-		if m.filePicker.CurrentDirectory != m.original.WorkDir {
-			v := m.filePicker.CurrentDirectory
-			req.WorkDir = &v
-		}
-		if m.intervalSeconds != m.original.IntervalSeconds {
-			v := m.intervalSeconds
-			req.IntervalSeconds = &v
+		req := client.CreateTaskRequest{
+			TaskName:        m.taskNameInput.Value(),
+			InitMessage:     m.initMessageInput.Value(),
+			AgentRunner:     m.selectedAgent,
+			AgentModel:      m.selectedModel,
+			AgentMode:       m.selectedMode,
+			WorkDir:         m.filePicker.CurrentDirectory,
+			IntervalSeconds: m.intervalSeconds,
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		task, err := m.client.UpdateTask(ctx, m.taskID, req)
-		return taskUpdatedMsg{task: task, err: err}
+		task, err := m.client.CreateTask(ctx, req)
+		return taskCreatedMsg{task: task, err: err}
 	}
-}
-
-func (m EditWizardModel) maybeAdvanceFromAgent() tea.Cmd {
-	if m.currentStep != stepAgent || !m.modelsLoaded || !m.modesLoaded {
-		return nil
-	}
-	return func() tea.Msg { return agentCapabilitiesReadyMsg{} }
-}
-
-func (m EditWizardModel) maybeLoadCapabilities() tea.Cmd {
-	if !m.agentsLoaded || !m.taskLoaded {
-		return nil
-	}
-
-	// Pre-select agent in the list
-	for i, a := range m.agents {
-		if a.ID == m.selectedAgent {
-			m.agentList.Select(i)
-			break
-		}
-	}
-
-	// Fetch models and modes for the pre-selected agent
-	m.loading = true
-	m.loadingMsg = fmt.Sprintf("Loading %s capabilities...", m.selectedAgent)
-	m.modelsLoaded = false
-	m.modesLoaded = false
-	m.models = nil
-	m.modes = nil
-	return tea.Batch(
-		m.fetchModels(m.selectedAgent),
-		m.fetchModes(m.selectedAgent),
-	)
 }
 
 // --- Update ---
 
-func (m EditWizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m WizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -306,6 +338,8 @@ func (m EditWizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg)
 
 	// Forward filter-match results back to the currently active list.
+	// The list generates this message internally (from filterItems) and
+	// needs to receive it back to populate filteredItems.
 	case list.FilterMatchesMsg:
 		var cmd tea.Cmd
 		switch m.currentStep {
@@ -322,35 +356,13 @@ func (m EditWizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.agents = msg.agents
-		m.agentsLoaded = true
 		// Populate agent list
 		items := make([]list.Item, len(msg.agents))
 		for i, a := range msg.agents {
 			items[i] = agentListItem{info: a}
 		}
 		m.agentList.SetItems(items)
-		return m, m.maybeLoadCapabilities()
-
-	case taskFetchedMsg:
-		m.loading = false
-		if msg.err != nil {
-			m.err = msg.err
-			return m, nil
-		}
-		m.original = msg.task
-		m.taskLoaded = true
-
-		// Pre-fill all inputs with current task values
-		m.taskNameInput.SetValue(msg.task.TaskName)
-		m.initMessageInput.SetValue(msg.task.InitMessage)
-		m.selectedAgent = msg.task.AgentRunner
-		m.selectedModel = msg.task.AgentModel
-		m.selectedMode = msg.task.AgentMode
-		m.filePicker.CurrentDirectory = msg.task.WorkDir
-		m.intervalInput.SetValue(formatDuration(msg.task.IntervalSeconds))
-		m.intervalSeconds = msg.task.IntervalSeconds
-
-		return m, m.maybeLoadCapabilities()
+		return m, nil
 
 	case modelsLoadedMsg:
 		m.modelsLoaded = true
@@ -364,14 +376,8 @@ func (m EditWizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				items[i] = stringListItem{value: model}
 			}
 			m.modelList.SetItems(items)
-			// Pre-select the current model
-			for i, model := range msg.models {
-				if model == m.selectedModel {
-					m.modelList.Select(i)
-					break
-				}
-			}
 		}
+		// Only clear loading once both have arrived
 		if m.modelsLoaded && m.modesLoaded {
 			m.loading = false
 		}
@@ -389,26 +395,20 @@ func (m EditWizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				items[i] = stringListItem{value: mode}
 			}
 			m.modeList.SetItems(items)
-			// Pre-select the current mode
-			for i, mode := range msg.modes {
-				if mode == m.selectedMode {
-					m.modeList.Select(i)
-					break
-				}
-			}
 		}
+		// Only clear loading once both have arrived
 		if m.modelsLoaded && m.modesLoaded {
 			m.loading = false
 		}
 		return m, m.maybeAdvanceFromAgent()
 
-	case taskUpdatedMsg:
+	case taskCreatedMsg:
 		m.loading = false
 		if msg.err != nil {
 			m.err = msg.err
 			return m, nil
 		}
-		m.UpdatedTask = msg.task
+		m.CreatedTask = msg.task
 		m.Submitted = true
 		m.currentStep = stepDone
 		return m, tea.Quit
@@ -429,7 +429,7 @@ func (m EditWizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 }
 
-func (m EditWizardModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m WizardModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// Global keys
 	switch msg.String() {
 	case "ctrl+c":
@@ -453,7 +453,7 @@ func (m EditWizardModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
-func (m EditWizardModel) handleInputKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m WizardModel) handleInputKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// For the textarea step, only Tab advances — Enter creates newlines
 	if m.currentStep == stepInitMessage {
 		switch msg.String() {
@@ -511,7 +511,7 @@ func (m EditWizardModel) handleInputKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd
 	return m, cmd
 }
 
-func (m EditWizardModel) handleListKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m WizardModel) handleListKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.currentStep == stepModel && m.modelList.FilterState() == list.Filtering {
 		switch msg.String() {
 		case "tab":
@@ -546,20 +546,20 @@ func (m EditWizardModel) handleListKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd)
 	return m, cmd
 }
 
-func (m EditWizardModel) handleConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m WizardModel) handleConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y", "Y":
 		m.loading = true
-		m.loadingMsg = "Updating task..."
+		m.loadingMsg = "Creating task..."
 		m.err = nil
-		return m, m.updateTask()
+		return m, m.createTask()
 	case "n", "N", "esc":
 		return m.prevStep()
 	}
 	return m, nil
 }
 
-func (m EditWizardModel) selectFromList() (tea.Model, tea.Cmd) {
+func (m WizardModel) selectFromList() (tea.Model, tea.Cmd) {
 	switch m.currentStep {
 	case stepAgent:
 		if i, ok := m.agentList.SelectedItem().(agentListItem); ok {
@@ -598,14 +598,24 @@ func (m EditWizardModel) selectFromList() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m EditWizardModel) nextStep() (tea.Model, tea.Cmd) {
+func (m WizardModel) maybeAdvanceFromAgent() tea.Cmd {
+	if m.currentStep != stepAgent || !m.modelsLoaded || !m.modesLoaded {
+		return nil
+	}
+	return func() tea.Msg { return agentCapabilitiesReadyMsg{} }
+}
+
+type agentCapabilitiesReadyMsg struct{}
+
+func (m WizardModel) nextStep() (tea.Model, tea.Cmd) {
 	if err := m.validateCurrentStep(); err != nil {
 		m.err = err
 		return m, nil
 	}
 	m.err = nil
 
-	// Store parsed interval before advancing
+	// Store parsed interval before advancing (validateCurrentStep can't
+	// modify the model since it's a value receiver).
 	if m.currentStep == stepInterval {
 		val := strings.TrimSpace(m.intervalInput.Value())
 		n, _ := parseDuration(val)
@@ -648,7 +658,7 @@ func (m EditWizardModel) nextStep() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m EditWizardModel) prevStep() (tea.Model, tea.Cmd) {
+func (m WizardModel) prevStep() (tea.Model, tea.Cmd) {
 	m.currentStep--
 	if m.currentStep < stepTaskName {
 		m.currentStep = stepTaskName
@@ -670,7 +680,7 @@ func (m EditWizardModel) prevStep() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m EditWizardModel) validateCurrentStep() error {
+func (m WizardModel) validateCurrentStep() error {
 	switch m.currentStep {
 	case stepTaskName:
 		if strings.TrimSpace(m.taskNameInput.Value()) == "" {
@@ -706,9 +716,9 @@ func (m EditWizardModel) validateCurrentStep() error {
 
 // --- View ---
 
-func (m EditWizardModel) View() tea.View {
+func (m WizardModel) View() tea.View {
 	if m.Quitting {
-		return tea.NewView("\n  Edit cancelled.\n\n")
+		return tea.NewView("\n  Wizard cancelled.\n\n")
 	}
 
 	if m.currentStep == stepDone {
@@ -719,7 +729,7 @@ func (m EditWizardModel) View() tea.View {
 
 	// Title
 	b.WriteString("\n")
-	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6")).Render("  ➜ Edit Task"))
+	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6")).Render("  ➜ Create New Task"))
 	b.WriteString("\n\n")
 
 	// Progress bar
@@ -759,8 +769,7 @@ func (m EditWizardModel) View() tea.View {
 	return v
 }
 
-// viewProgress reuses the same progress bar from wizard.go (via stepNames constant).
-func (m EditWizardModel) viewProgress() string {
+func (m WizardModel) viewProgress() string {
 	total := stepConfirm
 	current := m.currentStep
 	barWidth := 40
@@ -786,7 +795,7 @@ func (m EditWizardModel) viewProgress() string {
 		lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Render(bar))
 }
 
-func (m EditWizardModel) viewCurrentStep() string {
+func (m WizardModel) viewCurrentStep() string {
 	var b strings.Builder
 
 	switch m.currentStep {
@@ -861,76 +870,59 @@ func (m EditWizardModel) viewCurrentStep() string {
 	return b.String()
 }
 
-func (m EditWizardModel) viewConfirm() string {
+func (m WizardModel) viewConfirm() string {
 	var b strings.Builder
 
-	b.WriteString(stepTitleStyle.Render("  Review & Confirm Changes"))
+	b.WriteString(stepTitleStyle.Render("  Review & Confirm"))
 	b.WriteString("\n\n")
 
 	maxKeyW := 18
 	maxValW := 50
 
-	// Helper to detect if a value changed from original
-	changedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("11")) // yellow
-
-	rowWithChange := func(key, oldVal, newVal string) string {
+	row := func(key, val string) string {
 		k := confirmKeyStyle.Render(fmt.Sprintf("  %-*s", maxKeyW, key))
-		if oldVal != newVal {
-			v := changedStyle.Render(fmt.Sprintf("%s → %s  (changed)", truncateStr(oldVal, maxValW/2), truncateStr(newVal, maxValW/2)))
-			return k + v
-		}
-		v := confirmValStyle.Render(truncateStr(newVal, maxValW))
+		v := confirmValStyle.Render(truncateStr(val, maxValW))
 		return k + v
 	}
 
-	b.WriteString(rowWithChange("Name", m.original.TaskName, m.taskNameInput.Value()) + "\n")
-
+	b.WriteString(row("Name", m.taskNameInput.Value()) + "\n")
 	b.WriteString(confirmKeyStyle.Render(fmt.Sprintf("  %-*s", maxKeyW, "Init Message")) + "\n")
-	initMsg := m.initMessageInput.Value()
-	if initMsg != m.original.InitMessage {
-		for _, line := range strings.Split(initMsg, "\n") {
-			b.WriteString("     " + changedStyle.Render(line) + "\n")
-		}
-		b.WriteString("     " + changedStyle.Render("(changed)") + "\n")
-	} else {
-		for _, line := range strings.Split(initMsg, "\n") {
-			b.WriteString("     " + confirmValStyle.Render(line) + "\n")
-		}
+	for _, line := range strings.Split(m.initMessageInput.Value(), "\n") {
+		b.WriteString("     " + confirmValStyle.Render(line) + "\n")
 	}
-
-	b.WriteString(rowWithChange("Agent", m.original.AgentRunner, m.selectedAgent) + "\n")
-	if m.selectedModel != "" || m.original.AgentModel != "" {
-		b.WriteString(rowWithChange("Model", m.original.AgentModel, m.selectedModel) + "\n")
+	b.WriteString(row("Agent", m.selectedAgent) + "\n")
+	if m.selectedModel != "" {
+		b.WriteString(row("Model", m.selectedModel) + "\n")
 	}
-	if m.selectedMode != "" || m.original.AgentMode != "" {
-		b.WriteString(rowWithChange("Mode", m.original.AgentMode, m.selectedMode) + "\n")
+	if m.selectedMode != "" {
+		b.WriteString(row("Mode", m.selectedMode) + "\n")
 	}
-	b.WriteString(rowWithChange("WorkDir", m.original.WorkDir, m.filePicker.CurrentDirectory) + "\n")
-	b.WriteString(rowWithChange("Interval", formatDuration(m.original.IntervalSeconds), formatDuration(m.intervalSeconds)) + "\n")
+	b.WriteString(row("WorkDir", m.filePicker.CurrentDirectory) + "\n")
+	b.WriteString(row("Interval", formatDuration(m.intervalSeconds)) + "\n")
 
 	b.WriteString("\n")
-	b.WriteString(confirmKeyStyle.Render("  Press Y to confirm changes, N/Esc to go back"))
+	b.WriteString(confirmKeyStyle.Render("  Press Y to create, N/Esc to go back"))
 	b.WriteString("\n")
 
 	return b.String()
 }
 
-func (m EditWizardModel) viewDone() string {
+func (m WizardModel) viewDone() string {
 	var b strings.Builder
 
 	b.WriteString("\n\n")
-	b.WriteString(successStyle.Render("  ✓ Task updated successfully!"))
+	b.WriteString(successStyle.Render("  ✓ Task created successfully!"))
 	b.WriteString("\n\n")
 
-	if m.UpdatedTask != nil {
+	if m.CreatedTask != nil {
 		b.WriteString(confirmKeyStyle.Render("  ID:    "))
-		b.WriteString(confirmValStyle.Render(m.UpdatedTask.ID) + "\n")
+		b.WriteString(confirmValStyle.Render(m.CreatedTask.ID) + "\n")
 		b.WriteString(confirmKeyStyle.Render("  Name:  "))
-		b.WriteString(confirmValStyle.Render(m.UpdatedTask.TaskName) + "\n")
+		b.WriteString(confirmValStyle.Render(m.CreatedTask.TaskName) + "\n")
 		b.WriteString(confirmKeyStyle.Render("  Agent: "))
-		b.WriteString(confirmValStyle.Render(m.UpdatedTask.AgentRunner) + "\n")
+		b.WriteString(confirmValStyle.Render(m.CreatedTask.AgentRunner) + "\n")
 		b.WriteString(confirmKeyStyle.Render("  Status:"))
-		if m.UpdatedTask.Enabled {
+		if m.CreatedTask.Enabled {
 			b.WriteString(successStyle.Render(" enabled") + "\n")
 		} else {
 			b.WriteString(errorStyle.Render(" disabled") + "\n")
@@ -941,24 +933,98 @@ func (m EditWizardModel) viewDone() string {
 	return b.String()
 }
 
-// RunEditWizardTUI launches the interactive edit wizard as a standalone
-// Bubble Tea program. Returns nil if the task was updated, or an error if the
-// user cancelled or the TUI failed.
-func RunEditWizardTUI(taskID, serverURL string) error {
-	program := tea.NewProgram(NewEditWizardModel(taskID, serverURL))
+// --- Helpers ---
 
+// parseDuration converts natural language duration strings to seconds.
+// Supported formats: "30s" (seconds), "5m" (minutes), "2h" (hours), "1d" (days),
+// or a plain number (treated as seconds).
+func parseDuration(s string) (int, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, fmt.Errorf("empty string")
+	}
+
+	last := s[len(s)-1]
+	if last >= '0' && last <= '9' {
+		// Plain number — treat as seconds
+		n, err := strconv.Atoi(s)
+		if err != nil {
+			return 0, fmt.Errorf("expected a number or duration like 5m, 2h, 1d")
+		}
+		return n, nil
+	}
+
+	numStr := s[:len(s)-1]
+	n, err := strconv.Atoi(numStr)
+	if err != nil {
+		return 0, fmt.Errorf("expected a number followed by s/m/h/d")
+	}
+
+	switch last {
+	case 's':
+		return n, nil
+	case 'm':
+		return n * 60, nil
+	case 'h':
+		return n * 3600, nil
+	case 'd':
+		return n * 86400, nil
+	default:
+		return 0, fmt.Errorf("unknown suffix %q (use s, m, h, or d)", string(last))
+	}
+}
+
+// formatDuration formats seconds into a human-readable string.
+func formatDuration(secs int) string {
+	switch {
+	case secs >= 86400 && secs%86400 == 0:
+		return fmt.Sprintf("%dd", secs/86400)
+	case secs >= 3600 && secs%3600 == 0:
+		return fmt.Sprintf("%dh", secs/3600)
+	case secs >= 60 && secs%60 == 0:
+		return fmt.Sprintf("%dm", secs/60)
+	default:
+		return fmt.Sprintf("%ds", secs)
+	}
+}
+
+func truncateStr(s string, max int) string {
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	return string(runes[:max-3]) + "..."
+}
+
+// formatError formats an error message with appropriate styling.
+// API errors get a red ✗, validation/local errors get a yellow ⚠.
+func formatError(err error) string {
+	var apiErr *client.APIError
+	if errors.As(err, &apiErr) {
+		return errorStyle.Render("  ✗ " + err.Error())
+	}
+	return warnStyle.Render("  ⚠ " + err.Error())
+}
+
+// ErrWizardCancelled is returned when the user exits a wizard without
+// submitting.
+var ErrWizardCancelled = fmt.Errorf("wizard cancelled")
+
+// RunCreateWizardTUI launches the interactive create-task wizard as a
+// standalone Bubble Tea program. Returns the created task, nil if the user
+// cancelled, or an error if the program failed.
+func RunCreateWizardTUI(serverURL string) (*client.Task, error) {
+	program := tea.NewProgram(NewWizardModel(serverURL))
 	result, err := program.Run()
 	if err != nil {
-		return fmt.Errorf("TUI error: %w", err)
+		return nil, fmt.Errorf("TUI error: %w", err)
 	}
-
-	wm, ok := result.(EditWizardModel)
+	wm, ok := result.(WizardModel)
 	if !ok {
-		return fmt.Errorf("unexpected model type")
+		return nil, fmt.Errorf("unexpected model type")
 	}
-	if wm.UpdatedTask == nil && !wm.Submitted {
-		return ErrWizardCancelled
+	if wm.CreatedTask == nil && !wm.Submitted {
+		return nil, nil
 	}
-
-	return nil
+	return wm.CreatedTask, nil
 }
