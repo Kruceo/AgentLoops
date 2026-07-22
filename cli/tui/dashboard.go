@@ -14,6 +14,15 @@ import (
 	"agentloops/cli/client"
 )
 
+// DashboardAction represents what the dashboard wants to do after quitting.
+type DashboardAction int
+
+const (
+	DashboardQuit       DashboardAction = iota
+	DashboardCreateTask
+	DashboardEditTask
+)
+
 // --- View state machine ---
 
 type dashboardView int
@@ -41,8 +50,8 @@ type taskStartedMsg struct {
 	err    error
 }
 
-// returnToDashboardMsg signals the dashboard to refresh its task list after a
-// sub-program (e.g. create/edit wizard) has completed.
+// returnToDashboardMsg signals the dashboard to refresh its task list (used
+// by the start-result overlay auto-return timer).
 type returnToDashboardMsg struct{}
 
 // --- Model ---
@@ -77,6 +86,10 @@ type TaskDashboardModel struct {
 
 	// Start result
 	startResultMsg string
+
+	// Action signal (chain pattern)
+	pendingAction DashboardAction
+	editTargetID  string
 }
 
 // NewTaskDashboardModel creates a new dashboard model.
@@ -290,20 +303,16 @@ func (m TaskDashboardModel) handleDashboardKey(msg tea.KeyPressMsg) (tea.Model, 
 		return m, nil
 
 	case "n":
-		// Launch the create wizard as a separate program. This keeps the
-		// dashboard simple and reuses the exact same wizard used by
-		// "task add".
-		return m, func() tea.Msg {
-			_, _ = RunCreateWizardTUI(m.serverURL)
-			return returnToDashboardMsg{}
-		}
+		m.pendingAction = DashboardCreateTask
+		m.quitting = true
+		return m, tea.Quit
 
 	case "e":
 		if item, ok := m.taskList.SelectedItem().(taskListItem); ok {
-			return m, func() tea.Msg {
-				_ = RunEditWizardTUI(item.task.ID, m.serverURL)
-				return returnToDashboardMsg{}
-			}
+			m.pendingAction = DashboardEditTask
+			m.editTargetID = item.task.ID
+			m.quitting = true
+			return m, tea.Quit
 		}
 		// No task selected — no-op
 		return m, nil
@@ -439,10 +448,18 @@ func (m TaskDashboardModel) renderDashboard(b *strings.Builder) {
 }
 
 // RunTaskDashboardTUI launches the main task dashboard TUI.
-// Returns nil if the user quits normally, or an error on failure.
-func RunTaskDashboardTUI(serverURL string) error {
+// Returns the action the dashboard wants to take after quitting, along with
+// any associated data (e.g. task ID for edit) and an error.
+func RunTaskDashboardTUI(serverURL string) (DashboardAction, string, error) {
 	m := NewTaskDashboardModel(serverURL)
 	program := tea.NewProgram(m)
-	_, err := program.Run()
-	return err
+	result, err := program.Run()
+	if err != nil {
+		return DashboardQuit, "", err
+	}
+	dm, ok := result.(TaskDashboardModel)
+	if !ok {
+		return DashboardQuit, "", fmt.Errorf("unexpected model type from dashboard TUI")
+	}
+	return dm.pendingAction, dm.editTargetID, nil
 }

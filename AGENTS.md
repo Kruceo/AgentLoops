@@ -57,8 +57,28 @@ Complex, self-contained flows (e.g. the create-task wizard, the edit-task wizard
 - Avoids lifecycle bugs such as missing `tea.WindowSizeMsg` and manual list sizing.
 - Keeps the parent model (e.g. dashboard) small and focused on its own state.
 
-Rule of thumb:
-- **Separate program**: multi-step wizards, forms, or any flow that has its own model and `Init`/`Update`/`View` lifecycle.
-- **Embedded overlay**: lightweight, single-screen interactions such as delete confirmation or a transient result message.
+## Chain pattern for sub-programs
 
-When calling a sub-program from the dashboard, return a command that runs it and then emits a refresh message so the parent re-fetches its data, as seen in `cli/tui/dashboard.go` for the `n` and `e` keys.
+When a parent TUI needs to launch a sub-program, use the **chain pattern**: the parent quits with an action signal, the orchestration layer runs the sub-program, then re-launches the parent. This ensures only one `tea.Program` is active at any time, avoiding stdin conflicts.
+
+**Never** launch a `tea.Program` from inside a `tea.Cmd` returned by another program's `Update`. Two programs reading from `/dev/tty` simultaneously will cause a race condition where keystrokes go to the wrong program.
+
+Example:
+```
+func runDashboard(...) error {
+    for {
+        action, data, err := RunDashboardTUI(...)  // dashboard quits with action
+        switch action {
+        case ActionQuit:
+            return nil
+        case ActionCreate:
+            RunCreateWizardTUI(...)  // sub-program runs while dashboard is stopped
+            // loop → re-launch dashboard
+        }
+    }
+}
+```
+
+Rule of thumb:
+- **Separate program + chain pattern**: multi-step wizards, forms, or any flow that has its own model and `Init`/`Update`/`View` lifecycle.
+- **Embedded overlay**: lightweight, single-screen interactions such as delete confirmation or a transient result message.
