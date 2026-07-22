@@ -1,0 +1,59 @@
+version: 2
+
+builds:
+  - id: agent-loop-orchestrator
+    binary: agent-loop-orchestrator
+    main: .
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+archives:
+  - formats: tar.gz
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}
+    format_overrides:
+      - goos: windows
+        formats: zip
+
+checksum:
+  name_template: checksums.txt
+
+sboms:
+  - artifacts: archive
+
+changelog:
+  sort: asc
+  use: github-native
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: Improvements
+      regexp: '^.*?improvement(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: Fixes
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 2
+    - title: Chores
+      regexp: '^.*?chore(\([[:word:]]+\))??!?:.+$'
+      order: 3
+    - title: Others
+      order: 999
