@@ -107,7 +107,7 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 	if err != nil {
 		return fmt.Errorf("do request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	limiter := io.LimitReader(resp.Body, maxResponseSize+1)
 	respBody, err := io.ReadAll(limiter)
@@ -314,13 +314,12 @@ func (c *Client) StreamRunOutput(ctx context.Context, runID string) (<-chan Stre
 
 	ch := make(chan StreamEvent)
 
-	go func() {
+		go func() {
 		defer close(ch)
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		scanner := bufio.NewScanner(resp.Body)
 		var currentType, currentData string
-		receivedDone := false
 
 		for scanner.Scan() {
 			line := scanner.Text()
@@ -335,7 +334,6 @@ func (c *Client) StreamRunOutput(ctx context.Context, runID string) (<-chan Stre
 				if currentType != "" || currentData != "" {
 					ch <- StreamEvent{Type: currentType, Data: currentData}
 					if currentType == "done" {
-						receivedDone = true
 						return
 					}
 					currentType = ""
@@ -359,7 +357,7 @@ func (c *Client) StreamRunOutput(ctx context.Context, runID string) (<-chan Stre
 		// context cancellation), fall back to querying the REST API for the
 		// run's final status. This makes the client resilient to stream
 		// interruptions.
-		if !receivedDone && ctx.Err() == nil {
+		if ctx.Err() == nil {
 			run, err := c.GetRun(ctx, runID)
 			if err == nil && run != nil {
 				status := "success"

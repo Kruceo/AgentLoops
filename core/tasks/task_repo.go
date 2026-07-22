@@ -84,7 +84,7 @@ func (r *TaskRepository) List(enabledOnly bool) ([]Task, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list tasks: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var tasks []Task
 	for rows.Next() {

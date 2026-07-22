@@ -137,10 +137,7 @@ func (h *Handler) GetAgentModes(w http.ResponseWriter, r *http.Request) {
 
 // ListTasks returns all tasks, optionally filtered by enabled status.
 func (h *Handler) ListTasks(w http.ResponseWriter, r *http.Request) {
-	enabledOnly := false
-	if r.URL.Query().Get("enabled") == "true" {
-		enabledOnly = true
-	}
+	enabledOnly := r.URL.Query().Get("enabled") == "true"
 
 	taskList, err := h.Tasks.List(enabledOnly)
 	if err != nil {
@@ -513,7 +510,7 @@ func (h *Handler) StreamRunOutput(w http.ResponseWriter, r *http.Request) {
 			status = "error"
 		}
 		doneData, _ := json.Marshal(map[string]string{"status": status})
-		fmt.Fprintf(w, "event: done\ndata: %s\nid: %d\n\n", doneData, seq)
+		_, _ = fmt.Fprintf(w, "event: done\ndata: %s\nid: %d\n\n", doneData, seq)
 		flusher.Flush()
 	}
 	defer sendDone()
@@ -548,13 +545,13 @@ func (h *Handler) StreamRunOutput(w http.ResponseWriter, r *http.Request) {
 			// Forward the chunk as an SSE event. JSON-encode the data string
 			// so the client can parse it as a JSON value.
 			dataJSON, _ := json.Marshal(chunk.Data)
-			fmt.Fprintf(w, "event: %s\ndata: %s\nid: %d\n\n", chunk.Type, dataJSON, seq)
+			_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\nid: %d\n\n", chunk.Type, dataJSON, seq)
 			seq++
 			flusher.Flush()
 
 		case <-ticker.C:
 			// Keep-alive: send an SSE comment to prevent proxy timeouts.
-			fmt.Fprintf(w, ": keep-alive\n\n")
+			_, _ = fmt.Fprintf(w, ": keep-alive\n\n")
 			flusher.Flush()
 		}
 	}

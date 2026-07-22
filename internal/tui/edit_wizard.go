@@ -745,11 +745,12 @@ func (m EditWizardModel) View() tea.View {
 
 	// Hints
 	b.WriteString("\n\n")
-	if m.currentStep == stepModel {
+	switch m.currentStep {
+	case stepModel:
 		b.WriteString(hintStyle.Render("  ↑↓: navigate  Enter: select  / filter  Esc: clear  Tab: next  Shift+Tab: back"))
-	} else if m.currentStep == stepWorkDir {
+	case stepWorkDir:
 		b.WriteString(hintStyle.Render("  j/k: navigate  Enter: open dir  h/Esc: parent  Tab: confirm  Shift+Tab: back  Ctrl+C: quit"))
-	} else {
+	default:
 		b.WriteString(hintStyle.Render("  ↑↓: navigate  Enter: select  Tab: next  Shift+Tab/Esc: back  Ctrl+C: quit"))
 	}
 	b.WriteString("\n")

@@ -417,7 +417,7 @@ func (m TaskDashboardModel) renderDashboard(b *strings.Builder) {
 
 	// Loading spinner
 	if m.loading {
-		b.WriteString(fmt.Sprintf("  %s %s\n", m.spinner.View(), m.loadingMsg))
+		fmt.Fprintf(b, "  %s %s\n", m.spinner.View(), m.loadingMsg)
 		return
 	}
 

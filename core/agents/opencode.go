@@ -75,7 +75,7 @@ func (a *OpencodeAgent) Run(ctx context.Context, workDir string, initMessage str
 				return
 			}
 			stdoutBuf.WriteString(line)
-			os.Stdout.WriteString(line)
+			_, _ = os.Stdout.WriteString(line)
 		}
 	}()
 
@@ -92,7 +92,7 @@ func (a *OpencodeAgent) Run(ctx context.Context, workDir string, initMessage str
 				return
 			}
 			stderrBuf.WriteString(line)
-			os.Stdout.WriteString(line)
+			_, _ = os.Stdout.WriteString(line)
 		}
 	}()
 

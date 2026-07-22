@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -80,7 +81,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("open database: %w", err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			log.Printf("error closing database: %v", err)
+		}
+	}()
 
 	if err := db.Migrate(database); err != nil {
 		return fmt.Errorf("migrate database: %w", err)
@@ -113,7 +118,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	// --- HTTP Server ---
-	addr := fmt.Sprintf(":%s", port)
+	addr := net.JoinHostPort(address, port)
 	httpServer := server.NewServer(addr, handler)
 
 	// --- Start Scheduler ---

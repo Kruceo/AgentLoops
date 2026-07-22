@@ -105,7 +105,7 @@ func (r *RunRepository) ListByTaskID(taskID string, limit int) ([]Run, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list runs by task id: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	return scanRuns(rows)
 }
@@ -123,7 +123,7 @@ func (r *RunRepository) ListAll(limit int) ([]Run, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list all runs: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	return scanRuns(rows)
 }
