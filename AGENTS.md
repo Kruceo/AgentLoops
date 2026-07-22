@@ -46,3 +46,19 @@ Client always need to use the server to run anything. The server is the core.
 # Error Handling
 
 All errors follow the pattern documented in [docs/errors.md](docs/errors.md). Use `core/errors` for error types, `handleError` in API handlers, and `formatError` in TUI.
+
+# TUI Architecture
+
+## Prefer separate programs over embedded sub-views
+
+Complex, self-contained flows (e.g. the create-task wizard, the edit-task wizard) should be launched as separate `tea.Program` instances instead of being embedded and manually forwarded inside another Bubble Tea model.
+
+- Reuses the exact same wizard used by dedicated CLI commands (`task add`, `task edit`).
+- Avoids lifecycle bugs such as missing `tea.WindowSizeMsg` and manual list sizing.
+- Keeps the parent model (e.g. dashboard) small and focused on its own state.
+
+Rule of thumb:
+- **Separate program**: multi-step wizards, forms, or any flow that has its own model and `Init`/`Update`/`View` lifecycle.
+- **Embedded overlay**: lightweight, single-screen interactions such as delete confirmation or a transient result message.
+
+When calling a sub-program from the dashboard, return a command that runs it and then emits a refresh message so the parent re-fetches its data, as seen in `cli/tui/dashboard.go` for the `n` and `e` keys.

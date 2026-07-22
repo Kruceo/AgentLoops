@@ -1,9 +1,6 @@
 package cmd
 
 import (
-	"fmt"
-
-	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
 
 	"agentloops/cli/tui"
@@ -52,16 +49,8 @@ func runTaskEdit(cmd *cobra.Command, args []string) error {
 		taskID = selected
 	}
 
-	program := tea.NewProgram(tui.NewEditWizardModel(taskID, serverURL))
-
-	result, err := program.Run()
-	if err != nil {
-		return fmt.Errorf("TUI error: %w", err)
-	}
-
-	wm, ok := result.(tui.EditWizardModel)
-	if ok && wm.UpdatedTask == nil && !wm.Submitted {
-		return fmt.Errorf("task was not updated")
+	if err := tui.RunEditWizardTUI(taskID, serverURL); err != nil {
+		return err
 	}
 
 	return nil

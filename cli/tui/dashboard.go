@@ -20,12 +20,8 @@ type dashboardView int
 
 const (
 	viewDashboard dashboardView = iota
-	viewCreate
-	viewEdit
 	viewDeleteConfirm
 	viewStartResult
-	viewCreateDone
-	viewEditDone
 )
 
 // --- Custom messages ---
@@ -45,13 +41,18 @@ type taskStartedMsg struct {
 	err    error
 }
 
+// returnToDashboardMsg signals the dashboard to refresh its task list after a
+// sub-program (e.g. create/edit wizard) has completed.
 type returnToDashboardMsg struct{}
 
 // --- Model ---
 
 // TaskDashboardModel is the central interactive TUI for managing tasks.
 // It uses a currentView state machine to switch between the main dashboard
-// list and sub-views (create, edit, delete confirm, start result).
+// list and lightweight overlays (delete confirm, start result).
+// Complex flows such as the create and edit wizards are launched as
+// separate tea.Program instances from RunTaskDashboardTUI instead of being
+// embedded and forwarded manually.
 type TaskDashboardModel struct {
 	serverURL string
 	client    *client.Client
@@ -69,10 +70,6 @@ type TaskDashboardModel struct {
 	loadingMsg string
 	err        error
 	spinner    spinner.Model
-
-	// Sub-views (nil when not active)
-	createWizard *WizardModel
-	editWizard   *EditWizardModel
 
 	// Delete confirmation
 	deleteTargetID   string
@@ -172,64 +169,6 @@ func (m TaskDashboardModel) deleteTask(taskID string) tea.Cmd {
 	}
 }
 
-// --- Sub-view forwarding helpers ---
-
-// forwardToCreateWizard forwards a message to the embedded create wizard.
-// If the wizard completes (Submitted) or is cancelled (Quitting), it cleans
-// up and transitions back to the dashboard view with a re-fetch.
-func (m *TaskDashboardModel) forwardToCreateWizard(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if m.createWizard == nil {
-		return m, nil
-	}
-	var cmd tea.Cmd
-	updatedWizard, cmd := (*m.createWizard).Update(msg)
-	wizardModel, ok := updatedWizard.(WizardModel)
-	if !ok {
-		return m, nil
-	}
-	m.createWizard = &wizardModel
-
-	if m.createWizard.Submitted {
-		m.currentView = viewCreateDone
-		// Keep wizard alive so View() can render the done view
-		return m, tea.Batch(m.fetchTasks(), tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
-			return returnToDashboardMsg{}
-		}))
-	}
-	if m.createWizard.Quitting {
-		m.quitting = true
-		return m, tea.Quit
-	}
-	return m, cmd
-}
-
-// forwardToEditWizard forwards a message to the embedded edit wizard.
-func (m *TaskDashboardModel) forwardToEditWizard(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if m.editWizard == nil {
-		return m, nil
-	}
-	var cmd tea.Cmd
-	updatedWizard, cmd := (*m.editWizard).Update(msg)
-	wizardModel, ok := updatedWizard.(EditWizardModel)
-	if !ok {
-		return m, nil
-	}
-	m.editWizard = &wizardModel
-
-	if m.editWizard.Submitted {
-		m.currentView = viewEditDone
-		// Keep wizard alive so View() can render the done view
-		return m, tea.Batch(m.fetchTasks(), tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
-			return returnToDashboardMsg{}
-		}))
-	}
-	if m.editWizard.Quitting {
-		m.quitting = true
-		return m, tea.Quit
-	}
-	return m, cmd
-}
-
 // --- Update ---
 
 func (m TaskDashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -239,14 +178,6 @@ func (m TaskDashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.taskList.SetWidth(min(60, msg.Width-10))
 		m.taskList.SetHeight(min(20, msg.Height-10))
-
-		// Forward to active sub-views so they can size themselves too.
-		if m.currentView == viewCreate && m.createWizard != nil {
-			return m.forwardToCreateWizard(msg)
-		}
-		if m.currentView == viewEdit && m.editWizard != nil {
-			return m.forwardToEditWizard(msg)
-		}
 		return m, nil
 
 	case tea.QuitMsg:
@@ -269,34 +200,10 @@ func (m TaskDashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Any other key returns to dashboard and re-fetches
 			m.currentView = viewDashboard
 			return m, m.fetchTasks()
-
-		case viewCreate:
-			return m.forwardToCreateWizard(msg)
-
-		case viewEdit:
-			return m.forwardToEditWizard(msg)
-
-		case viewCreateDone:
-			// Any keypress → nil out wizard, go to dashboard
-			m.createWizard = nil
-			m.currentView = viewDashboard
-			return m, nil
-
-		case viewEditDone:
-			m.editWizard = nil
-			m.currentView = viewDashboard
-			return m, nil
 		}
 
 	case list.FilterMatchesMsg:
-		// Forward filter results to whichever list is active.
-		if m.currentView == viewCreate && m.createWizard != nil {
-			return m.forwardToCreateWizard(msg)
-		}
-		if m.currentView == viewEdit && m.editWizard != nil {
-			return m.forwardToEditWizard(msg)
-		}
-		// Dashboard view — forward to the task list
+		// Forward filter results to the task list.
 		var cmd tea.Cmd
 		m.taskList, cmd = m.taskList.Update(msg)
 		return m, cmd
@@ -352,33 +259,13 @@ func (m TaskDashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		})
 
 	case returnToDashboardMsg:
-		m.createWizard = nil
-		m.editWizard = nil
 		m.currentView = viewDashboard
 		return m, m.fetchTasks()
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
-		if m.currentView == viewCreate && m.createWizard != nil {
-			_, subCmd := m.forwardToCreateWizard(msg)
-			return m, tea.Batch(cmd, subCmd)
-		}
-		if m.currentView == viewEdit && m.editWizard != nil {
-			_, subCmd := m.forwardToEditWizard(msg)
-			return m, tea.Batch(cmd, subCmd)
-		}
 		return m, cmd
-
-	default:
-		// Forward unknown messages to active sub-views (e.g. filepicker
-		// internal messages, textinput blink ticks from wizards).
-		if m.currentView == viewCreate && m.createWizard != nil {
-			return m.forwardToCreateWizard(msg)
-		}
-		if m.currentView == viewEdit && m.editWizard != nil {
-			return m.forwardToEditWizard(msg)
-		}
 	}
 
 	return m, nil
@@ -403,17 +290,20 @@ func (m TaskDashboardModel) handleDashboardKey(msg tea.KeyPressMsg) (tea.Model, 
 		return m, nil
 
 	case "n":
-		wiz := NewWizardModel(m.serverURL)
-		m.createWizard = &wiz
-		m.currentView = viewCreate
-		return m, m.createWizard.Init()
+		// Launch the create wizard as a separate program. This keeps the
+		// dashboard simple and reuses the exact same wizard used by
+		// "task add".
+		return m, func() tea.Msg {
+			_, _ = RunCreateWizardTUI(m.serverURL)
+			return returnToDashboardMsg{}
+		}
 
 	case "e":
 		if item, ok := m.taskList.SelectedItem().(taskListItem); ok {
-			wiz := NewEditWizardModel(item.task.ID, m.serverURL)
-			m.editWizard = &wiz
-			m.currentView = viewEdit
-			return m, m.editWizard.Init()
+			return m, func() tea.Msg {
+				_ = RunEditWizardTUI(item.task.ID, m.serverURL)
+				return returnToDashboardMsg{}
+			}
 		}
 		// No task selected — no-op
 		return m, nil
@@ -471,30 +361,6 @@ func (m TaskDashboardModel) View() tea.View {
 	}
 
 	switch m.currentView {
-	case viewCreate:
-		if m.createWizard != nil {
-			return m.createWizard.View()
-		}
-		return tea.NewView("")
-
-	case viewEdit:
-		if m.editWizard != nil {
-			return m.editWizard.View()
-		}
-		return tea.NewView("")
-
-	case viewCreateDone:
-		if m.createWizard != nil {
-			return m.createWizard.View()
-		}
-		return tea.NewView("")
-
-	case viewEditDone:
-		if m.editWizard != nil {
-			return m.editWizard.View()
-		}
-		return tea.NewView("")
-
 	case viewDeleteConfirm:
 		var b strings.Builder
 		if m.loading {

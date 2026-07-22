@@ -1005,3 +1005,26 @@ func formatError(err error) string {
 	}
 	return warnStyle.Render("  ⚠ " + err.Error())
 }
+
+// ErrWizardCancelled is returned when the user exits a wizard without
+// submitting.
+var ErrWizardCancelled = fmt.Errorf("wizard cancelled")
+
+// RunCreateWizardTUI launches the interactive create-task wizard as a
+// standalone Bubble Tea program. Returns the created task, nil if the user
+// cancelled, or an error if the program failed.
+func RunCreateWizardTUI(serverURL string) (*client.Task, error) {
+	program := tea.NewProgram(NewWizardModel(serverURL))
+	result, err := program.Run()
+	if err != nil {
+		return nil, fmt.Errorf("TUI error: %w", err)
+	}
+	wm, ok := result.(WizardModel)
+	if !ok {
+		return nil, fmt.Errorf("unexpected model type")
+	}
+	if wm.CreatedTask == nil && !wm.Submitted {
+		return nil, nil
+	}
+	return wm.CreatedTask, nil
+}

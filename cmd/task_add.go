@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
 
 	"agentloops/cli/tui"
@@ -49,17 +48,8 @@ func runTaskAdd(cmd *cobra.Command, args []string) error {
 
 	// Launch the TUI wizard
 	// Alt-screen is handled inside the model's View() via tea.View.AltScreen
-	program := tea.NewProgram(tui.NewWizardModel(serverURL))
-
-	result, err := program.Run()
-	if err != nil {
-		return fmt.Errorf("TUI error: %w", err)
-	}
-
-	// Check if the user quit without creating a task
-	wm, ok := result.(tui.WizardModel)
-	if ok && wm.CreatedTask == nil && !wm.Submitted {
-		return fmt.Errorf("task was not created")
+	if _, err := tui.RunCreateWizardTUI(serverURL); err != nil {
+		return err
 	}
 
 	return nil

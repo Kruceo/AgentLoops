@@ -940,3 +940,25 @@ func (m EditWizardModel) viewDone() string {
 	b.WriteString("\n")
 	return b.String()
 }
+
+// RunEditWizardTUI launches the interactive edit wizard as a standalone
+// Bubble Tea program. Returns nil if the task was updated, or an error if the
+// user cancelled or the TUI failed.
+func RunEditWizardTUI(taskID, serverURL string) error {
+	program := tea.NewProgram(NewEditWizardModel(taskID, serverURL))
+
+	result, err := program.Run()
+	if err != nil {
+		return fmt.Errorf("TUI error: %w", err)
+	}
+
+	wm, ok := result.(EditWizardModel)
+	if !ok {
+		return fmt.Errorf("unexpected model type")
+	}
+	if wm.UpdatedTask == nil && !wm.Submitted {
+		return ErrWizardCancelled
+	}
+
+	return nil
+}
