@@ -578,7 +578,7 @@ func (h *Handler) streamFinishedRun(w http.ResponseWriter, runID string) {
 
 	// Send the full output as a single output event.
 	outputJSON, _ := json.Marshal(run.Output)
-	fmt.Fprintf(w, "event: output\ndata: %s\nid: 0\n\n", outputJSON)
+	_, _ = fmt.Fprintf(w, "event: output\ndata: %s\nid: 0\n\n", outputJSON)
 	flusher.Flush()
 
 	// Send the done event with the run's final status.
@@ -587,6 +587,6 @@ func (h *Handler) streamFinishedRun(w http.ResponseWriter, runID string) {
 		status = "error"
 	}
 	doneData, _ := json.Marshal(map[string]string{"status": status})
-	fmt.Fprintf(w, "event: done\ndata: %s\nid: 1\n\n", doneData)
+	_, _ = fmt.Fprintf(w, "event: done\ndata: %s\nid: 1\n\n", doneData)
 	flusher.Flush()
 }
